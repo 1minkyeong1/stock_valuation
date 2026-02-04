@@ -218,14 +218,29 @@ debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.mark
         return null;
       });
 
-      final dec = (widget.market == Market.us) ? 2 : 0;
+      final isUS = widget.market == Market.us;
+      final fd = isUS ? 2 : 0;
 
-        if (saved != null) {
-        // 저장값이 "의미 있는 값"일 때만 덮어쓰기 (0은 자동값/미입력일 수 있음)
-        if (saved.eps != 0) _epsCtrl.text = saved.eps.toStringAsFixed(dec);
-        if (saved.bps != 0) _bpsCtrl.text = saved.bps.toStringAsFixed(dec);
-        // DPS는 0이 "무배당"일 수 있으니, 사용자가 직접 입력해둔 케이스만 덮는 걸 권장
-        if (saved.dps != 0) _dpsCtrl.text = saved.dps.toStringAsFixed(dec);
+      if (saved != null) {
+        // ✅ 저장값이 "의미 있는 값"일 때만 덮어쓰기
+        if (saved.eps != 0) {
+         _epsCtrl.text = isUS
+             ? fmtUsdDecimal(saved.eps, fractionDigits: fd).replaceAll('\$', '')
+             : fmtWonDecimal(saved.eps, fractionDigits: fd);
+        }
+
+        if (saved.bps != 0) {
+          _bpsCtrl.text = isUS
+              ? fmtUsdDecimal(saved.bps, fractionDigits: fd).replaceAll('\$', '')
+              : fmtWonDecimal(saved.bps, fractionDigits: fd);
+        }
+
+        // DPS는 0이 무배당일 수 있으니 기존 정책 유지(0이면 덮어쓰기 안 함)
+        if (saved.dps != 0) {
+          _dpsCtrl.text = isUS
+              ? fmtUsdDecimal(saved.dps, fractionDigits: fd).replaceAll('\$', '')
+              : fmtWonDecimal(saved.dps, fractionDigits: fd);
+        }
 
         rPct = saved.rPct;
       }
@@ -251,15 +266,24 @@ debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.mark
   }
 
   void _applyToTextFields({required double price, required StockFundamentals f}) {
-    final dec = (widget.market == Market.us) ? 2 : 0;
+    final isUS = widget.market == Market.us;
+    final fd = isUS ? 2 : 0;
 
-    _priceCtrl.text = (widget.market == Market.us)
-        ? price.toStringAsFixed(2)
-        : price.toStringAsFixed(0);
+    _priceCtrl.text = isUS
+        ? fmtUsdDecimal(price, fractionDigits: 2).replaceAll('\$', '')
+        : fmtWonDecimal(price, fractionDigits: 0);
 
-    _epsCtrl.text = f.eps.toStringAsFixed(dec);
-    _bpsCtrl.text = f.bps.toStringAsFixed(dec);
-    _dpsCtrl.text = f.dps.toStringAsFixed(dec);
+    _epsCtrl.text = isUS
+        ? fmtUsdDecimal(f.eps, fractionDigits: fd).replaceAll('\$', '')
+        : fmtWonDecimal(f.eps, fractionDigits: fd);
+
+    _bpsCtrl.text = isUS
+        ? fmtUsdDecimal(f.bps, fractionDigits: fd).replaceAll('\$', '')
+        : fmtWonDecimal(f.bps, fractionDigits: fd);
+
+    _dpsCtrl.text = isUS
+        ? fmtUsdDecimal(f.dps, fractionDigits: fd).replaceAll('\$', '')
+        : fmtWonDecimal(f.dps, fractionDigits: fd);
   }
 
   // ---------- 파싱 ----------
