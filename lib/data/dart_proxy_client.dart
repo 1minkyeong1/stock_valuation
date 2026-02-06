@@ -24,19 +24,36 @@ class DartProxyClient {
     final base = workerBaseUrl.endsWith('/')
         ? workerBaseUrl.substring(0, workerBaseUrl.length - 1)
         : workerBaseUrl;
+
     final u = Uri.parse('$base$path');
-    return u.replace(queryParameters: qp);
+
+    // 기존 query + qp merge (qp가 우선)
+    final merged = {...u.queryParameters, ...qp};
+    return u.replace(queryParameters: merged);
   }
 
   Future<Map<String, dynamic>> _getJson(String path, Map<String, String> qp) async {
-    final uri = _uri(path, qp);
-     debugPrint('[DartProxy] GET $uri');
+    // ✅ 캐시 버스트(항상 새 요청)
+    final qp2 = {
+      ...qp,
+      'cb': DateTime.now().millisecondsSinceEpoch.toString(),
+    };
 
-    final res = await _client.get(uri, headers: {
-      'accept': 'application/json,text/plain,*/*',
-    });
+    final uri = _uri(path, qp2);
+    debugPrint('[DartProxy] GET $uri');
 
-    // ✅ 한글/특수문자 안전 디코딩
+    final res = await _client.get(
+      uri,
+      headers: {
+        'accept': 'application/json,text/plain,*/*',
+
+        // ✅ 캐시 금지(클라/프록시 방어)
+        'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    );
+
     final bodyText = utf8.decode(res.bodyBytes);
 
     if (res.statusCode != 200) {
@@ -48,12 +65,9 @@ class DartProxyClient {
     if (root is! Map<String, dynamic>) {
       throw Exception('Worker response is not a JSON object: $bodyText');
     }
-
-    // Worker가 에러를 JSON으로 감싸서 줄 때도 있으니 방어
     if (root['error'] != null) {
       throw Exception('Worker error: ${root['error']} ${root['message'] ?? ''}');
     }
-
     return root;
   }
 

@@ -89,10 +89,10 @@ class _ResultPageState extends State<ResultPage> {
     // ✅ 가격 포맷터 준비
     _priceFormatterKr = MoneyInputFormatter(allowDecimal: false);
     _priceFormatterUs = MoneyInputFormatter(allowDecimal: true, decimalDigits: 2);
-// 디버깅    
-debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.market}');
-    _loadFavState();
-    _load();
+    // 디버깅    
+    debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.market}');
+        _loadFavState();
+        _load();
   }
 
   @override
@@ -605,16 +605,20 @@ debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.mark
   }) {
     final v = controller.text.trim().replaceAll(',', '');
     final val = double.tryParse(v) ?? 0;
+    final isEditingMinusOnly = (v == '-');
 
     final up = label.trim().toUpperCase();
     final isEps = up == "EPS";
+    final isBps = up == "BPS";
     final isDps = up == "DPS";
 
-    // ✅ 규칙
-    final showLoss = isEps && FinanceRules.isLossEps(val); // EPS<0 = 적자
+    // EPS, BPS 둘다 음수 허용
+    final allowNegative = isEps || isBps;
 
+    // ✅ 규칙
+    final showLoss = isEps && !isEditingMinusOnly && FinanceRules.isLossEps(val);
     // ✅ DPS는 0이 “무배당”일 수 있으므로 showMissing 처리 분리
-    final showMissing = !isDps && FinanceRules.isMissing(val); // EPS/BPS만 0 => 자동값 없음
+    final showMissing = !isDps && !isEditingMinusOnly && FinanceRules.isMissing(val);
     final showDpsZero = isDps && (val == 0);                   // DPS=0 => 무배당/데이터없음
 
     return Column(
@@ -637,11 +641,17 @@ debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.mark
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
           inputFormatters: [
-            // KR: 정수+콤마, US: 소수 허용
-            widget.market == Market.us
-                ? MoneyInputFormatter(allowDecimal: true, decimalDigits: 2)
-                : MoneyInputFormatter(allowDecimal: false),
-          ],
+          widget.market == Market.us
+              ? MoneyInputFormatter(
+                  allowDecimal: true,
+                  decimalDigits: 2,
+                  allowNegative: allowNegative,
+                )
+              : MoneyInputFormatter(
+                  allowDecimal: false,
+                  allowNegative: allowNegative,
+                ),
+        ],
           decoration: const InputDecoration(
             hintText: "직접 입력 가능",
             border: OutlineInputBorder(),
@@ -1221,10 +1231,12 @@ String _fmtMoney(num v) {
 class MoneyInputFormatter extends TextInputFormatter {
   final bool allowDecimal;
   final int decimalDigits;
+  final bool allowNegative;
 
   MoneyInputFormatter({
     required this.allowDecimal,
     this.decimalDigits = 2,
+    this.allowNegative = false,
   });
 
   static String _withComma(String s) {
@@ -1244,6 +1256,13 @@ class MoneyInputFormatter extends TextInputFormatter {
 
     // 콤마 제거
     var t = raw.replaceAll(',', '');
+
+    // ✅ 음수 처리 (맨 앞 '-' 1개만 허용)
+    bool neg = false;
+    if (allowNegative) {
+      if (t.startsWith('-')) neg = true;
+      t = t.replaceAll('-', '');
+    }
 
     // 숫자/소수점 외 제거
     if (allowDecimal) {
@@ -1267,6 +1286,14 @@ class MoneyInputFormatter extends TextInputFormatter {
       t = t.replaceAll(RegExp(r'[^0-9]'), '');
     }
 
+    // ✅ "-"만 입력 중인 상태 허용
+    if (allowNegative && neg && t.isEmpty) {
+      return const TextEditingValue(
+        text: '-',
+        selection: TextSelection.collapsed(offset: 1),
+      );
+    }
+
     if (t.isEmpty) return const TextEditingValue(text: '');
 
     // 정수/소수 분리 후 정수부 콤마
@@ -1278,6 +1305,10 @@ class MoneyInputFormatter extends TextInputFormatter {
       formatted = '${_withComma(intPart)}.$decPart';
     } else {
       formatted = _withComma(t);
+    }
+
+     if (allowNegative && neg) {
+      formatted = '-$formatted';
     }
 
     // 커서 위치: 끝으로 보내는 단순 방식(가장 안정적)

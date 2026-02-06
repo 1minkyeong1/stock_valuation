@@ -219,13 +219,16 @@ class KisKrStockRepository implements StockRepository {
     // 3) 어떤 연도/보고서로 조회할지 결정
     // - targetYear를 줬는데 DART에 없을 수 있으니, targetYear 포함해서 뒤로 2년까지 fallback
     final now = DateTime.now();
-    final years = targetYear != null
-        ? <int>[targetYear, targetYear - 1, targetYear - 2]
-        : <int>[now.year, now.year - 1, now.year - 2];
+
+    // ✅ targetYear 없으면 "직전연도(FY)"부터 시작
+    final baseYear = targetYear ?? (now.year - 1);
+
+    // ✅ 최근 3개년 탐색
+    final years = <int>[baseYear, baseYear - 1, baseYear - 2];
 
     // ✅ 우선순위(최신 보고서 쪽부터 시도)
-    // 11014(3Q) -> 11012(H1) -> 11013(1Q) -> 11011(FY)
-    const reprtOrder = <String>['11014', '11012', '11013', '11011'];
+    // 11011(FY) -> 11014(3Q) -> 11012(H1) -> 11013(1Q)  
+    const reprtOrder = <String>['11011', '11014', '11012', '11013'];
 
     double eps = 0.0;
     double bps = 0.0;
