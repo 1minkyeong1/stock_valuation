@@ -289,6 +289,7 @@ class _ResultPageState extends State<ResultPage> {
   // ---------- 파싱 ----------
   double _parseDouble(TextEditingController c) {
     final t = c.text.trim().replaceAll(',', '');
+    if (t == '-' || t.isEmpty) return 0.0; // ✅ 타이핑 중 예외 방지
     return double.tryParse(t) ?? 0.0;
   }
 
