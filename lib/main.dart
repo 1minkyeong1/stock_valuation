@@ -32,9 +32,10 @@ Future<void> _initAds() async {
 
 String _workerBaseUrl() {
   // 로컬 테스트 (wrangler dev)
-  if (kDebugMode) return 'http://192.168.0.69:8787';
+  if (kDebugMode) return 'https://stock-proxy.k17mnk.workers.dev';
+  // if (kDebugMode) return 'http://192.168.0.69:8787';
   // 실배포 Worker 도메인
-  return 'https://stock-proxy.k17mnk.workers.dev';
+   return 'https://stock-proxy.k17mnk.workers.dev';
 }
 
 RepoHub _buildRepoHub({required String workerBaseUrl}) {

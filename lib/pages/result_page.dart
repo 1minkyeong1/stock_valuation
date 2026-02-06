@@ -508,12 +508,6 @@ debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.mark
 
             const SizedBox(height: 6),
 
-            // ✅ 재무 기준 표기: periodLabel > basDt > year > TTM
-            // Text(
-            //   "재무 조회 기준: ${f.periodLabel ?? (f.year?.toString() ?? 'TTM')}",
-            //   style: const TextStyle(fontSize: 12, color: Colors.grey),
-            // ),
-
             if (f.basDt != null) ...[
               const SizedBox(height: 4),
               Text(
