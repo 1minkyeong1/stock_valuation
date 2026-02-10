@@ -289,7 +289,7 @@ class _ResultPageState extends State<ResultPage> {
   // ---------- 파싱 ----------
   double _parseDouble(TextEditingController c) {
     final t = c.text.trim().replaceAll(',', '');
-    if (t == '-' || t.isEmpty) return 0.0; // ✅ 타이핑 중 예외 방지
+    if (t == '-' || t.isEmpty) return 0.0;
     return double.tryParse(t) ?? 0.0;
   }
 
@@ -598,29 +598,49 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  // EPS/BPS/DPS 전용 “라벨+배지+텍스트필드” 위젯
+ // EPS/BPS/DPS 전용 “라벨+배지+텍스트필드” 위젯
   Widget _numFieldWithAutoBadge({
     required String label,
     required TextEditingController controller,
     required void Function(String) onChanged,
   }) {
-    final v = controller.text.trim().replaceAll(',', '');
-    final val = double.tryParse(v) ?? 0;
-    final isEditingMinusOnly = (v == '-');
+    final rawText = controller.text.trim().replaceAll(',', '');
+    final isEditingMinusOnly = (rawText == '-');
+
+    // "-"만은 double 파싱이 안 되므로 0으로 처리
+    final val = (!isEditingMinusOnly)
+        ? (double.tryParse(rawText) ?? 0)
+        : 0.0;
 
     final up = label.trim().toUpperCase();
     final isEps = up == "EPS";
     final isBps = up == "BPS";
     final isDps = up == "DPS";
 
-    // EPS, BPS 둘다 음수 허용
+    // ✅ EPS/BPS만 음수 허용
     final allowNegative = isEps || isBps;
 
-    // ✅ 규칙
-    final showLoss = isEps && !isEditingMinusOnly && FinanceRules.isLossEps(val);
-    // ✅ DPS는 0이 “무배당”일 수 있으므로 showMissing 처리 분리
-    final showMissing = !isDps && !isEditingMinusOnly && FinanceRules.isMissing(val);
-    final showDpsZero = isDps && (val == 0);                   // DPS=0 => 무배당/데이터없음
+    // ✅ 배지 규칙
+    final showLoss = isEps && !isEditingMinusOnly && FinanceRules.isLossEps(val); // EPS<0
+    final showMissing =
+        !isDps && !isEditingMinusOnly && FinanceRules.isMissing(val); // EPS/BPS만 0 => 자동값 없음
+    final showDpsZero = isDps && (val == 0); // DPS=0 => 무배당/데이터없음
+
+    // ✅ ± 토글: 키보드에 '-'가 없어도 음수 입력 가능
+    void toggleSign() {
+      final t = controller.text.trim();
+      if (t.isEmpty) {
+        controller.text = '-';
+      } else if (t == '-') {
+        controller.text = '';
+      } else if (t.startsWith('-')) {
+        controller.text = t.substring(1);
+      } else {
+        controller.text = '-$t';
+      }
+      controller.selection = TextSelection.collapsed(offset: controller.text.length);
+      onChanged(controller.text);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -634,28 +654,42 @@ class _ResultPageState extends State<ResultPage> {
             else if (showMissing)
               _autoMissingBadge()
             else if (showDpsZero)
-              _dpsZeroBadge(), // ✅ 새 배지
+              _dpsZeroBadge(),
           ],
         ),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+          keyboardType: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true, // 뜨는 키보드에선 '-'가 나오게
+          ),
           inputFormatters: [
-          widget.market == Market.us
-              ? MoneyInputFormatter(
-                  allowDecimal: true,
-                  decimalDigits: 2,
-                  allowNegative: allowNegative,
-                )
-              : MoneyInputFormatter(
-                  allowDecimal: false,
-                  allowNegative: allowNegative,
-                ),
-        ],
-          decoration: const InputDecoration(
+            widget.market == Market.us
+                ? MoneyInputFormatter(
+                    allowDecimal: true,
+                    decimalDigits: 2,
+                    allowNegative: allowNegative,
+                  )
+                : MoneyInputFormatter(
+                    allowDecimal: false,
+                    allowNegative: allowNegative,
+                  ),
+          ],
+          decoration: InputDecoration(
             hintText: "직접 입력 가능",
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            // ✅ EPS/BPS만 ± 버튼 제공
+            suffixIcon: allowNegative
+                ? IconButton(
+                    tooltip: '부호 전환(±)',
+                    onPressed: toggleSign,
+                    icon: const Text(
+                      '±',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                  )
+                : null,
           ),
           onChanged: onChanged,
         ),

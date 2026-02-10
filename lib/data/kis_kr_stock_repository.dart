@@ -226,9 +226,8 @@ class KisKrStockRepository implements StockRepository {
     // ✅ 최근 3개년 탐색
     final years = <int>[baseYear, baseYear - 1, baseYear - 2];
 
-    // ✅ 우선순위(최신 보고서 쪽부터 시도)
-    // 11011(FY) -> 11014(3Q) -> 11012(H1) -> 11013(1Q)  
-    const reprtOrder = <String>['11011', '11014', '11012', '11013'];
+    // ✅ 3Q 우선, 없으면 FY fallback
+    const reprtOrder = <String>['11014', '11011'];
 
     double eps = 0.0;
     double bps = 0.0;
@@ -244,7 +243,6 @@ class KisKrStockRepository implements StockRepository {
 
     for (final y in years) {
       for (final reprt in reprtOrder) {
-        // ✅ 요청하신 로그(어디 넣나?) → "실제 호출 직전"이 제일 의미있습니다.
         debugPrint('fnltt call corp=$corpCode year=$y reprt=$reprt fs=CFS');
 
         final cfs = await dart.fnlttSinglAcntAll(
@@ -280,27 +278,34 @@ class KisKrStockRepository implements StockRepository {
       if (fnlttRows != null) break;
     }
 
-    // 5) fnlttRows에서 순이익/자본총계 뽑기
     if (fnlttRows != null && fnlttRows.isNotEmpty) {
       final profit = _pickNetProfitFromDart(fnlttRows);
       final equity = _pickEquityFromDart(fnlttRows);
 
-      // 분기/반기/3Q는 누적값일 때가 많아서 연환산(이전 공공데이터 코드 로직 그대로)
       final annualizedProfit = _annualizeProfit(profit, usedReprt ?? '11011');
 
       if (shares > 0) {
         eps = (annualizedProfit != 0) ? (annualizedProfit / shares) : 0.0;
         bps = (equity != 0) ? (equity / shares) : 0.0;
       } else {
-        // shares가 없으면 eps/bps 계산 불가 → 0 유지
         _logDart('shares=0 so eps/bps cannot be calculated');
       }
 
-      final info = _reprtInfo(usedYear ?? (targetYear ?? now.year), usedReprt ?? '11011');
-      basDt = info.basDt;
-      periodLabel = info.label;
+      // ✅ metrics-lite 규칙: 실제로 선택된 usedYear/usedReprt로 basDt/label 계산
+      if (usedYear != null && usedReprt != null) {
+        final info = _reprtInfo(usedYear, usedReprt);
+        basDt = info.basDt;        // 11014 => YYYY0930
+        periodLabel = info.label;  // "YYYY 3Q"
+      } else {
+        basDt = null;
+        periodLabel = null;
+      }
 
-      _logDart('fnltt picked: year=$usedYear reprt=$usedReprt profit=$profit (annual=$annualizedProfit) equity=$equity shares=$shares -> eps=$eps bps=$bps');
+      _logDart(
+        'fnltt picked: year=$usedYear reprt=$usedReprt profit=$profit '
+        '(annual=$annualizedProfit) equity=$equity shares=$shares -> eps=$eps bps=$bps '
+        'basDt=$basDt label=$periodLabel'
+      );
     } else {
       _logDart('fnlttRows empty for corp=$corpCode stock=$c (years=$years)');
     }
@@ -328,7 +333,7 @@ class KisKrStockRepository implements StockRepository {
       eps: eps,
       bps: bps,
       dps: dps,
-      year: usedYear ?? targetYear,
+      year: usedYear ?? targetYear ?? baseYear,
       basDt: basDt,
       periodLabel: periodLabel,
     );

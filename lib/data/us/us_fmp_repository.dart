@@ -1,15 +1,12 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 import '../stock_repository.dart';
 import 'fmp_client.dart';
-import 'dart:async';
 
 class UsFmpRepository implements StockRepository {
   final FmpClient _fmp;
   UsFmpRepository(this._fmp);
-
-  // FMP 플랜 제한: income-statement limit <= 5
-  static const int _maxLimit = 5;
 
   // (선택) 짧은 TTL 캐시로 429 완화
   static const Duration _cacheTtl = Duration(minutes: 3);
@@ -55,13 +52,6 @@ class UsFmpRepository implements StockRepository {
     return 0.0;
   }
 
-  // static dynamic _firstRaw(Map<String, dynamic> m, List<String> keys) {
-  //   for (final k in keys) {
-  //     if (m.containsKey(k)) return m[k];
-  //   }
-  //   return null;
-  // }
-
   static int? _toYear(dynamic y) {
     final s = y?.toString().trim();
     if (s == null || s.isEmpty) return null;
@@ -90,10 +80,12 @@ class UsFmpRepository implements StockRepository {
     return '$year ${q}Q';
   }
 
-  static int _safeLimit(int n) => n.clamp(0, _maxLimit);
-
   static bool _isHttp402(Object e) => e.toString().contains('HTTP 402');
   static bool _isHttp429(Object e) => e.toString().contains('HTTP 429');
+
+  static bool _isLegacyMsg(Object e) =>
+      e.toString().toLowerCase().contains('legacy endpoint') ||
+      e.toString().toLowerCase().contains('no longer supported');
 
   // -------------------------
   // StockRepository
@@ -103,11 +95,14 @@ class UsFmpRepository implements StockRepository {
     final q = query.trim();
     if (q.isEmpty) return [];
 
-    final raw = await _fmp.searchSymbol(q);
-    final items = <StockSearchItem>[];
+    // ✅ Worker /fmp/search -> { ok:true, items:[...] } (혹은 예외적으로 List)
+    final resp = await _fmp.search(q);
+    final itemsRaw = (resp['items'] is List) ? (resp['items'] as List) : const [];
 
-    for (final e in raw) {
-      final m = (e is Map<String, dynamic>) ? e : Map<String, dynamic>.from(e as Map);
+    final items = <StockSearchItem>[];
+    for (final e in itemsRaw) {
+      if (e is! Map) continue; // 안전 가드
+      final m = Map<String, dynamic>.from(e);
 
       final code = (m['symbol'] ?? '').toString().trim().toUpperCase();
       if (code.isEmpty) continue;
@@ -128,23 +123,53 @@ class UsFmpRepository implements StockRepository {
     return items;
   }
 
+  // ✅ 가격은 무조건 Worker /fmp/price(정규화)에서만 가져온다.
   @override
   Future<double> getPrice(String code) async {
     final symbol = code.trim().toUpperCase();
     if (symbol.isEmpty) return 0.0;
 
     try {
-      final q = await _fmp.quoteOne(symbol);
-      if (q == null) return 0.0;
+      final r = await _fmp.priceNormalized(symbol);
+      if (kDebugMode) debugPrint('[FMP] priceNormalized $symbol => $r');
 
-      final price = _firstNumber(q, ['price', 'previousClose', 'open']);
-      if (kDebugMode) debugPrint('[FMP] quote $symbol => $q');
-      return price;
+      if (r['ok'] == true) {
+        return _asDouble(r['price']);
+      }
+      return 0.0;
     } catch (e) {
-      // 429/402 등에서도 ResultPage가 죽지 않게 0 반환
       if (kDebugMode) debugPrint('[FMP] getPrice failed: $e');
       return 0.0;
     }
+  }
+
+  @override
+  Future<PriceQuote> getPriceQuote(String code) async {
+    final symbol = code.trim().toUpperCase();
+    if (symbol.isEmpty) {
+      return const PriceQuote(price: 0, basDt: null, listedShares: 0, marketCap: 0);
+    }
+
+    try {
+      final r = await _fmp.priceNormalized(symbol);
+      if (kDebugMode) debugPrint('[FMP] priceQuote $symbol => $r');
+
+      if (r['ok'] == true) {
+        final price = _asDouble(r['price']);
+        final marketCap = _asDouble(r['marketCap']).round(); // int
+
+        return PriceQuote(
+          price: price,
+          basDt: null,
+          listedShares: 0,
+          marketCap: marketCap,
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FMP] getPriceQuote failed: $e');
+    }
+
+    return const PriceQuote(price: 0, basDt: null, listedShares: 0, marketCap: 0);
   }
 
   @override
@@ -156,16 +181,16 @@ class UsFmpRepository implements StockRepository {
       return const StockFundamentals(eps: 0, bps: 0, dps: 0);
     }
 
-    // (선택) TTL 캐시로 429 완화
+    // TTL 캐시
     final cacheKey = '$symbol:${targetYear ?? "latest"}';
     final now = DateTime.now();
     final ce = _cache[cacheKey];
     if (ce != null && now.difference(ce.at) <= _cacheTtl) {
-      if (dbg) debugPrint('[FMP] cache hit => $cacheKey');
+      if (dbg) debugPrint('[FMP] fundamentals cache hit => $cacheKey');
       return ce.value;
     }
 
-    // 동일 심볼 동시 호출 방지
+    // inflight 방지
     final inflight = _inflight[cacheKey];
     if (inflight != null) return inflight;
 
@@ -182,9 +207,49 @@ class UsFmpRepository implements StockRepository {
     return fut;
   }
 
+  List<Map<String, dynamic>> _unwrapList(dynamic v) {
+    // 1) 응답이 곧바로 List
+    if (v is List) {
+      return v
+          .whereType<Map<dynamic, dynamic>>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+
+    // 2) { ok, items: [...] }
+    if (v is Map && v['items'] is List) {
+      final items = v['items'] as List;
+      return items
+          .whereType<Map<dynamic, dynamic>>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+
+    return <Map<String, dynamic>>[];
+  }
+
+  Map<String, dynamic>? _unwrapOne(dynamic v) {
+    // 1) Map 하나
+    if (v is Map) {
+      // 신규 형태인 경우 items[0]
+      if (v['items'] is List && (v['items'] as List).isNotEmpty) {
+        final first = (v['items'] as List).first;
+        if (first is Map) return Map<String, dynamic>.from(first);
+      }
+      return Map<String, dynamic>.from(v);
+    }
+
+    // 2) List[0]
+    if (v is List && v.isNotEmpty && v.first is Map) {
+      return Map<String, dynamic>.from(v.first as Map);
+    }
+
+    return null;
+  }
+
   Future<StockFundamentals> _getFundamentalsImpl(String symbol, {int? targetYear}) async {
     final dbg = kDebugMode;
-    if (dbg) debugPrint('[FMP] getFundamentals START symbol=$symbol');
+    if (dbg) debugPrint('[FMP] getFundamentals START symbol=$symbol targetYear=$targetYear');
 
     StockFundamentals fail(String reason) => StockFundamentals(
           eps: 0,
@@ -200,192 +265,178 @@ class UsFmpRepository implements StockRepository {
         );
 
     try {
-      // ==========================================================
-      // A) 병렬 호출 (총 소요시간 = 가장 느린 1개)
-      // ==========================================================
-      final kmF = _fmp.keyMetricsTtmOne(symbol);
-      final incomeF = _fmp.incomeStatement(
-        symbol: symbol,
-        period: 'quarter',
-        limit: _safeLimit((targetYear != null) ? _maxLimit : 4),
-      );
-      final bsF = _fmp.balanceSheetStatement(symbol: symbol, period: 'quarter', limit: 1);
-      final divF = _fmp.dividendsCompany(symbol: symbol, limit: 40);
+      double pickBpsFromWorker(Map<String, dynamic> br) {
+            // flat: {bps: ...}
+            final direct = _asDouble(br['bps']);
+            if (direct != 0.0) return direct;
 
-      final results = await Future.wait([kmF, incomeF, bsF, divF])
-          .timeout(const Duration(seconds: 10));
+            // wrapped: {items:[{bps: ...}]}
+            final items = br['items'];
+            if (items is List && items.isNotEmpty && items.first is Map) {
+              return _asDouble((items.first as Map)['bps']);
+            }
+            return 0.0;
+          }
 
-      final km = results[0] as Map<String, dynamic>?;
-      final incomeQ = results[1] as List<dynamic>;
-      final bsQ = results[2] as List<Map<String, dynamic>>;
-      final divs = results[3] as List<Map<String, dynamic>>;
+      // 병렬 호출
+      final incomeF = _fmp.incomeStatement(symbol: symbol, limit: 12);
+      final bsF = _fmp.balanceSheet(symbol: symbol, limit: 1);
+      final profF = _fmp.profileOne(symbol);
+      final divF = _fmp.dividends(symbol: symbol, limit: 20);
 
-      // profile은 shares가 없을 때만(조건부 1회)
-      Map<String, dynamic>? prof;
+      final results = await Future.wait([incomeF, bsF, profF, divF]).timeout(const Duration(seconds: 10));
 
-      // ==========================================================
-      // B) 디버깅(추가 호출 없이 받은 데이터로만)
-      // ==========================================================
+      final incomeList = _unwrapList(results[0]);
+      final bsList = _unwrapList(results[1]);
+      final prof = _unwrapOne(results[2]);
+      final divs = _unwrapList(results[3]);
+
       if (dbg) {
-        debugPrint('[FMP] incomeQ len=${incomeQ.length}  bsQ len=${bsQ.length}  divs len=${divs.length}');
-        debugPrint('[FMP] km keys => ${km?.keys.toList()}');
-        if (incomeQ.isNotEmpty) {
-          final first = (incomeQ.first is Map<String, dynamic>)
-              ? incomeQ.first as Map<String, dynamic>
-              : Map<String, dynamic>.from(incomeQ.first as Map);
-          debugPrint('[FMP] incomeQ first keys => ${first.keys.toList()}');
-        }
-        if (bsQ.isNotEmpty) debugPrint('[FMP] bsQ first keys => ${bsQ.first.keys.toList()}');
-        if (divs.isNotEmpty) debugPrint('[FMP] div first keys => ${divs.first.keys.toList()}');
+        debugPrint('[FMP] income len=${incomeList.length} bs len=${bsList.length} div len=${divs.length}');
       }
 
-      // ==========================================================
-      // C) 메타(year/basDt/periodLabel)
-      // ==========================================================
+      // 사용할 최신 row 선택
       Map<String, dynamic>? latestIncome;
-      if (incomeQ.isNotEmpty) {
-        latestIncome = (incomeQ.first is Map<String, dynamic>)
-            ? incomeQ.first as Map<String, dynamic>
-            : Map<String, dynamic>.from(incomeQ.first as Map);
+      if (incomeList.isNotEmpty) {
+        if (targetYear == null) {
+          latestIncome = incomeList.first;
+        } else {
+          Map<String, dynamic>? picked;
+          for (final r in incomeList) {
+            final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
+            if (y == targetYear) {
+              picked = r;
+              break;
+            }
+          }
+          latestIncome = picked ?? incomeList.first;
+        }
       }
 
-      final year = _toYear(
-        latestIncome?['calendarYear'] ??
-            latestIncome?['fiscalYear'] ??
-            latestIncome?['year'],
-      );
+      final year = _toYear(latestIncome?['calendarYear'] ?? latestIncome?['fiscalYear'] ?? latestIncome?['year']);
 
       final incomeBasDt = _toBasDt(
-        latestIncome?['date'] ??
-            latestIncome?['filingDate'] ??
-            latestIncome?['acceptedDate'],
+        latestIncome?['date'] ?? latestIncome?['acceptedDate'] ?? latestIncome?['filingDate'],
       );
 
-      final qLabel = _quarterLabelFromBasDt(incomeBasDt, year);
-      final periodLabel = qLabel ?? (year != null ? '$year' : 'TTM');
+      final periodLabel = _quarterLabelFromBasDt(incomeBasDt, year) ?? (year != null ? '$year' : 'TTM');
 
-      String? bsBasDt;
-      if (bsQ.isNotEmpty) {
-        bsBasDt = _toBasDt(bsQ.first['date'] ?? bsQ.first['acceptedDate'] ?? bsQ.first['filingDate']);
+      // EPS(TTM) 근사: 4개 합
+      double epsTtm = 0.0;
+      List<Map<String, dynamic>> epsRows = incomeList;
+
+      if (targetYear != null) {
+        final filtered = incomeList.where((r) {
+          final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
+          return y == targetYear || y == targetYear - 1;
+        }).toList();
+        if (filtered.isNotEmpty) epsRows = filtered;
       }
 
-      String? divBasDt;
+      for (final r in epsRows.take(4)) {
+        epsTtm += _firstNumber(r, ['eps', 'epsDiluted', 'epsdiluted']);
+      }
+
+
+     // ✅ BPS = equity / shares (안전 + equity2 반영)
+      double assets = 0.0;
+      double liab = 0.0;
+      double equity = 0.0;
+
+      if (bsList.isNotEmpty) {
+        assets = _firstNumber(bsList.first, ['totalAssets']);
+        liab   = _firstNumber(bsList.first, ['totalLiabilities']);
+
+        equity = _firstNumber(bsList.first, [
+          'totalStockholdersEquity',
+          'totalEquity',
+          'totalShareholdersEquity',
+          'totalAssetsMinusTotalLiabilities', // (있으면 사용)
+        ]);
+      }
+
+      final equity2 = (equity != 0.0)
+          ? equity
+          : ((assets != 0.0 || liab != 0.0) ? (assets - liab) : 0.0);
+
+      // shares는 profile만 보지 말고, BS에도 있으면 먼저 사용
+      double shares = 0.0;
+
+      if (bsList.isNotEmpty) {
+        shares = _firstNumber(bsList.first, [
+          'commonStockSharesOutstanding',
+          'sharesOutstanding',
+          'shares',
+        ]);
+      }
+      if (shares == 0.0 && prof != null) {
+        shares = _firstNumber(prof, [
+          'sharesOutstanding',
+          'shares',
+          'commonStockSharesOutstanding',
+        ]);
+      }
+
+      if (shares == 0.0 && prof != null) {
+        final mc = _firstNumber(prof, ['marketCap', 'mktCap']);
+        final px = _firstNumber(prof, ['price']);
+        if (mc != 0.0 && px != 0.0) {
+          shares = mc / px;
+        }
+      }
+
+      double bps = (equity2 != 0.0 && shares != 0.0) ? (equity2 / shares) : 0.0;
+
+      String bpsSource = 'balance-sheet(equity2/shares)';
+      String bpsLabel  = (equity != 0.0)
+          ? 'BS (equity/shares)'
+          : ((assets != 0.0 || liab != 0.0) ? 'BS (assets-liab)/shares' : 'BS (no equity)');
+
+      if (bps == 0.0 || bps.isNaN) {
+        try {
+          final br = await _fmp.bpsNormalized(symbol);
+          if (br['ok'] == true) {
+            final bps2 = pickBpsFromWorker(br);
+
+            if (bps2 > 0.0) {
+              bps = bps2;
+              final src = (br['source'] ?? 'unknown').toString();
+              bpsSource = 'worker:/fmp/bps($src)';
+              bpsLabel  = 'BPS fallback ($src)';
+            } else {
+              bpsLabel  = 'BPS 없음';
+              bpsSource = 'worker:/fmp/bps(no_value)';
+            }
+          } else {
+            final err = (br['error'] ?? 'unknown').toString();
+            bpsLabel  = 'BPS 실패($err)';
+            bpsSource = 'worker:/fmp/bps(fail)';
+          }
+        } catch (e) {
+          if (dbg) debugPrint('[FMP] bps fallback error: $e');
+          bpsLabel  = 'BPS 실패';
+          bpsSource = 'worker:/fmp/bps(error)';
+        }
+      }
+
+      // DPS 근사: 최근 8개 합
+      double dps = 0.0;
       if (divs.isNotEmpty) {
-        divBasDt = _toBasDt(divs.first['date'] ?? divs.first['paymentDate'] ?? divs.first['recordDate']);
-      }
-
-      // ==========================================================
-      // D) EPS/BPS/DPS 값 계산 (km 우선, 없으면 fallback)
-      // ==========================================================
-      final epsTtm = (km == null)
-          ? 0.0
-          : _firstNumber(km, ['netIncomePerShareTTM', 'epsTTM', 'eps', 'epsDilutedTTM', 'epsDiluted']);
-
-      final bpsTtm = (km == null)
-          ? 0.0
-          : _firstNumber(km, ['bookValuePerShareTTM', 'bookValuePerShare', 'bvpsTTM', 'bvps']);
-
-      final dpsTtm = (km == null)
-          ? 0.0
-          : _firstNumber(km, ['dividendPerShareTTM', 'dividendPerShare', 'dpsTTM', 'dps']);
-
-      // EPS fallback: 최근 4분기 EPS 합(근사 TTM)
-      double epsFallback = 0.0;
-      if (epsTtm == 0.0 && incomeQ.isNotEmpty) {
-        for (final e in incomeQ.take(4)) {
-          final m = (e is Map<String, dynamic>) ? e : Map<String, dynamic>.from(e as Map);
-          epsFallback += _firstNumber(m, ['eps', 'epsDiluted']);
+        for (final d in divs.take(8)) {
+          dps += _firstNumber(d, ['dividend', 'adjDividend', 'amount']);
         }
       }
 
-      // BPS fallback: equity / shares
-      double bpsFallback = 0.0;
-      if (bpsTtm == 0.0) {
-        final equity = (bsQ.isEmpty)
-            ? 0.0
-            : _firstNumber(bsQ.first, [
-                'totalStockholdersEquity',
-                'totalEquity',
-                'totalShareholdersEquity',
-                'totalAssetsMinusTotalLiabilities',
-              ]);
+      final epsSource = 'income-statement(sum4)';
+      final dpsSource = 'dividends(sum8)';
 
-        double shares = (bsQ.isEmpty)
-            ? 0.0
-            : _firstNumber(bsQ.first, [
-                'commonStockSharesOutstanding',
-                'commonSharesOutstanding',
-                'sharesOutstanding',
-              ]);
+      final epsLabel = (incomeBasDt != null) ? 'TTM (as of $incomeBasDt)' : 'TTM';
+      final dpsLabel = 'Dividends (last 8)';
 
-        // 2) income에서 shares fallback
-        if (shares == 0.0 && incomeQ.isNotEmpty) {
-          final m0 = (incomeQ.first is Map<String, dynamic>)
-              ? incomeQ.first as Map<String, dynamic>
-              : Map<String, dynamic>.from(incomeQ.first as Map);
-          shares = _firstNumber(m0, ['weightedAverageShsOutDil', 'weightedAverageShsOut']);
-        }
-
-        // 3) profile 조건부 호출
-        if (shares == 0.0) {
-          try {
-            prof = await _fmp.profileOne(symbol);
-            if (prof != null) shares = _firstNumber(prof, ['sharesOutstanding']);
-          } catch (_) {}
-        }
-
-        if (equity != 0.0 && shares != 0.0) {
-          bpsFallback = equity / shares;
-        }
-
-        if (dbg) debugPrint('[FMP] BPS calc => equity=$equity shares=$shares bps=$bpsFallback');
-      }
-
-      // DPS fallback: 배당 리스트 합산(근사)
-      double dpsFallback = 0.0;
-      if (dpsTtm == 0.0 && divs.isNotEmpty) {
-        for (final e in divs.take(8)) {
-          dpsFallback += _firstNumber(e, ['dividend', 'adjDividend', 'amount']);
-        }
-      }
-
-      final epsFinal = (epsTtm != 0.0) ? epsTtm : epsFallback;
-      final bpsFinal = (bpsTtm != 0.0) ? bpsTtm : bpsFallback;
-      final dpsFinal = (dpsTtm != 0.0) ? dpsTtm : dpsFallback;
-
-      // ==========================================================
-      // E) 표시용 source/label
-      // ==========================================================
-      final epsSource = (epsTtm != 0.0) ? 'key-metrics-ttm' : 'income-statement(sum4Q)';
-      final bpsSource = (bpsTtm != 0.0) ? 'key-metrics-ttm' : 'balance-sheet(equity/shares)';
-      final dpsSource = (dpsTtm != 0.0) ? 'key-metrics-ttm' : 'dividends(sum)';
-
-      final epsLabel = (incomeBasDt != null)
-          ? ((epsTtm != 0.0) ? 'TTM (as of $incomeBasDt)' : '$periodLabel (as of $incomeBasDt)')
-          : ((epsTtm != 0.0) ? 'TTM' : periodLabel);
-
-      final bpsLabel = (bsBasDt != null)
-          ? ((bpsTtm != 0.0) ? 'TTM (as of $bsBasDt)' : 'BS as of $bsBasDt')
-          : ((bpsTtm != 0.0) ? 'TTM' : 'BS');
-
-      final dpsLabel = (divBasDt != null)
-          ? ((dpsTtm != 0.0) ? 'TTM (as of $divBasDt)' : 'Dividends up to $divBasDt')
-          : ((dpsTtm != 0.0) ? 'TTM' : 'Dividends');
-
-      if (dbg) {
-        debugPrint('[FMP] eps: ttm=$epsTtm fallback=$epsFallback final=$epsFinal');
-        debugPrint('[FMP] bps: ttm=$bpsTtm fallback=$bpsFallback final=$bpsFinal');
-        debugPrint('[FMP] dps: ttm=$dpsTtm fallback=$dpsFallback final=$dpsFinal');
-        debugPrint('[FMP] meta => year=$year basDt=$incomeBasDt periodLabel=$periodLabel');
-      }
-
-      // ==========================================================
-      // F) 반환
-      // ==========================================================
       return StockFundamentals(
-        eps: epsFinal,
-        bps: bpsFinal,
-        dps: dpsFinal,
+        eps: epsTtm,
+        bps: bps,
+        dps: dps,
         year: year,
         basDt: incomeBasDt,
         periodLabel: periodLabel,
@@ -400,32 +451,36 @@ class UsFmpRepository implements StockRepository {
       if (dbg) debugPrint('[FMP] getFundamentals TIMEOUT');
       return fail('FMP 타임아웃(10s)');
     } catch (e, st) {
+      if (_isLegacyMsg(e)) {
+        if (dbg) {
+          debugPrint('[FMP] LEGACY: $e');
+          debugPrint('$st');
+        }
+        return fail('FMP 레거시 차단');
+      }
       if (_isHttp402(e)) {
-        if (dbg) { debugPrint('[FMP] 402: $e'); debugPrint('$st'); }
-        return fail('FMP 402(플랜 제한): limit<=5 필요');
+        if (dbg) {
+          debugPrint('[FMP] 402: $e');
+          debugPrint('$st');
+        }
+        return fail('FMP 402(플랜 제한)');
       }
       if (_isHttp429(e)) {
-        if (dbg) { debugPrint('[FMP] 429: $e'); debugPrint('$st'); }
+        if (dbg) {
+          debugPrint('[FMP] 429: $e');
+          debugPrint('$st');
+        }
         return fail('FMP 429(한도초과): 잠시 후 재시도');
       }
-      if (dbg) { debugPrint('[FMP] ERROR: $e'); debugPrint('$st'); }
+      if (dbg) {
+        debugPrint('[FMP] ERROR: $e');
+        debugPrint('$st');
+      }
       return fail('FMP 오류: ${e.toString()}');
     } finally {
       if (dbg) debugPrint('[FMP] getFundamentals END symbol=$symbol');
     }
   }
-
-  @override
-  Future<PriceQuote> getPriceQuote(String code) async {
-    final p = await getPrice(code);
-    return PriceQuote(
-      price: p,
-      basDt: null,     // US는 굳이 안 쓰면 null
-      listedShares: 0,
-      marketCap: 0,
-    );
-  }
-
 }
 
 class _CacheEntry {
