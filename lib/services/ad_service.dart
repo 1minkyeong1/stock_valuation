@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -19,40 +20,49 @@ class AdService {
   InterstitialAd? _interstitial;
   bool _loadingInterstitial = false;
 
-  // ---------------------------
-  // ✅ 테스트 광고 ID (AdMob 공식)
-  // ---------------------------
+  /// ✅ 릴리즈에서도 테스트광고 강제:
+  /// flutter run --release --dart-define=TEST_ADS=true
+  static const bool _forceTestAds =
+      bool.fromEnvironment('TEST_ADS', defaultValue: false);
+
+  bool get _useTestAds => _forceTestAds || !kReleaseMode;
+
+  // ------------------------------------------------------------
+  // ✅ 본인 광고 단위 ID(ANDROID)만 여기에 넣으세요 (ca-app-pub-xxx/yyy)
+  // ------------------------------------------------------------
+  static const String _androidBannerProd = 'ca-app-pub-4855768071671191/9260415794';
+  static const String _androidInterstitialProd = 'ca-app-pub-4855768071671191/7923293139';
+
+  // ------------------------------------------------------------
+  // ✅ AdMob 공식 테스트 광고 단위 ID
+  // ------------------------------------------------------------
+  static const String _androidBannerTest = 'ca-app-pub-3940256099942544/6300978111';
+  static const String _androidInterstitialTest = 'ca-app-pub-3940256099942544/1033173712';
+  static const String _iosBannerTest = 'ca-app-pub-3940256099942544/2934735716';
+  static const String _iosInterstitialTest = 'ca-app-pub-3940256099942544/4411468910';
+
   String get bannerUnitId {
-    if (kDebugMode) {
-      return Platform.isAndroid
-          ? 'ca-app-pub-3940256099942544/6300978111'
-          : 'ca-app-pub-3940256099942544/2934735716';
+    if (_useTestAds) {
+      return Platform.isAndroid ? _androidBannerTest : _iosBannerTest;
     }
-    // ignore: todo
-    // TODO: 여기에 본인 AdMob 배너 유닛ID로 교체
-    return Platform.isAndroid
-        ? 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx'
-        : 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx';
+    if (Platform.isAndroid) return _androidBannerProd;
+
+    // iOS 아직 없으면 일단 테스트ID로 둬도 OK (iOS 빌드할 때 교체)
+    return _iosBannerTest;
   }
 
   String get interstitialUnitId {
-    if (kDebugMode) {
-      return Platform.isAndroid
-          ? 'ca-app-pub-3940256099942544/1033173712'
-          : 'ca-app-pub-3940256099942544/4411468910';
+    if (_useTestAds) {
+      return Platform.isAndroid ? _androidInterstitialTest : _iosInterstitialTest;
     }
-    // ignore: todo
-    // TODO: 여기에 본인 AdMob 전면 유닛ID로 교체
-    return Platform.isAndroid
-        ? 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx'
-        : 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx';
+    if (Platform.isAndroid) return _androidInterstitialProd;
+    return _iosInterstitialTest;
   }
 
   // ---------------------------
   // 로드 / 준비
   // ---------------------------
   void warmUp() {
-    // 앱 시작 시 미리 1번 준비해두면 좋음
     _loadInterstitialIfNeeded();
   }
 
@@ -62,6 +72,8 @@ class AdService {
 
     _loadingInterstitial = true;
 
+    debugPrint('[ADS] load interstitial... useTest=$_useTestAds unit=$interstitialUnitId');
+
     InterstitialAd.load(
       adUnitId: interstitialUnitId,
       request: const AdRequest(),
@@ -69,15 +81,21 @@ class AdService {
         onAdLoaded: (ad) {
           _interstitial = ad;
           _loadingInterstitial = false;
+          debugPrint('[ADS] interstitial LOADED ✅');
 
           ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdShowedFullScreenContent: (ad) {
+              _lastShownAt = DateTime.now();
+              debugPrint('[ADS] interstitial SHOWED ✅');
+            },
             onAdDismissedFullScreenContent: (ad) {
+              debugPrint('[ADS] interstitial DISMISSED');
               ad.dispose();
               _interstitial = null;
-              // 다음 광고 미리 로드
               _loadInterstitialIfNeeded();
             },
             onAdFailedToShowFullScreenContent: (ad, error) {
+              debugPrint('[ADS] interstitial FAILED_TO_SHOW ❌ $error');
               ad.dispose();
               _interstitial = null;
               _loadInterstitialIfNeeded();
@@ -87,6 +105,7 @@ class AdService {
         onAdFailedToLoad: (error) {
           _interstitial = null;
           _loadingInterstitial = false;
+          debugPrint('[ADS] interstitial FAILED_TO_LOAD ❌ $error (unit=$interstitialUnitId)');
         },
       ),
     );
@@ -97,16 +116,13 @@ class AdService {
   // ---------------------------
   void onOpenResult() {
     _openResultCount++;
-    // 카운트가 올라갈수록 로드 확률 올리기
     _loadInterstitialIfNeeded();
   }
 
   bool _isEligibleNow() {
-    // 3회마다만
     if (_openResultCount <= 0) return false;
     if (_openResultCount % everyN != 0) return false;
 
-    // 쿨다운 체크
     final last = _lastShownAt;
     if (last == null) return true;
 
@@ -114,40 +130,40 @@ class AdService {
     return diff >= cooldownSeconds;
   }
 
-  /// ✅ 네비게이션 직전/직후 “자연스러운 지점”에서 호출
-  /// - 광고가 없거나 조건이 아니면 그냥 바로 리턴(사용자 흐름 안 막음)
   Future<void> maybeShowInterstitial() async {
     if (!_isEligibleNow()) return;
 
-    // 준비된 광고가 없으면: 로드만 걸고 스킵
-    if (_interstitial == null) {
+    final ad = _interstitial;
+
+    if (ad == null) {
+      debugPrint('[ADS] not ready yet → skip show');
       _loadInterstitialIfNeeded();
       return;
     }
 
-    final ad = _interstitial;
-    _interstitial = null; // show 중복 방지
+    _interstitial = null;
 
     final completer = Completer<void>();
 
-    ad!.fullScreenContentCallback = FullScreenContentCallback(
+    ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (ad) {
-        // 기록
         _lastShownAt = DateTime.now();
+        debugPrint('[ADS] interstitial SHOWED ✅');
       },
       onAdDismissedFullScreenContent: (ad) {
+        debugPrint('[ADS] interstitial DISMISSED');
         ad.dispose();
         _loadInterstitialIfNeeded();
         if (!completer.isCompleted) completer.complete();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
+        debugPrint('[ADS] interstitial FAILED_TO_SHOW ❌ $error');
         ad.dispose();
         _loadInterstitialIfNeeded();
         if (!completer.isCompleted) completer.complete();
       },
     );
 
-    // show
     ad.show();
     await completer.future;
   }
