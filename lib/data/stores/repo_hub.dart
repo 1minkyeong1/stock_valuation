@@ -1,5 +1,7 @@
-import '../models/market.dart';
-import 'stock_repository.dart';
+// 저장소 주입 / 관리용
+
+import '../../models/market.dart';
+import '../repository/stock_repository.dart';
 
 class RepoHub {
   final StockRepository kr;

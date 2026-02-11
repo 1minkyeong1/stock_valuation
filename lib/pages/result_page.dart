@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/market.dart';
-import '../data/repo_hub.dart';
-import '../data/stock_repository.dart';
+import '../data/stores/repo_hub.dart';
+import '../data/repository/stock_repository.dart';
 
-import '../data/favorites_store.dart';
-import '../data/stock_input_store.dart';
+import '../data/stores/favorites_store.dart';
+import '../data/stores/stock_input_store.dart';
 
 import '../models/valuation_result.dart';
 import '../models/valuation_rating.dart';

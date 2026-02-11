@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
-import '../stock_repository.dart';
-import 'fmp_client.dart';
+import 'stock_repository.dart';
+import '../api/fmp_client.dart';
 
 class UsFmpRepository implements StockRepository {
   final FmpClient _fmp;

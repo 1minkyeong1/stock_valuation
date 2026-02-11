@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/market.dart';
-import '../utils/finance_rules.dart';
-import 'stock_repository.dart';
+import '../../models/market.dart';
+import '../../utils/finance_rules.dart';
+import '../repository/stock_repository.dart';
 
 class FavoritesStore {
   static const _k = 'favorites_v2';

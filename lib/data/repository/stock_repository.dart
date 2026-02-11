@@ -1,3 +1,5 @@
+// 인터페이스 / 추상화
+
 class StockSearchItem {
   final String code;
   final String name;

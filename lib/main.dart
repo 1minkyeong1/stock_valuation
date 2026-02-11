@@ -5,15 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'pages/search_page.dart';
-import 'data/repo_hub.dart';
+import 'data/stores/repo_hub.dart';
 import 'services/ad_service.dart';
 
 // ✅ KR(KIS) Repo 추가
-import 'data/kis_kr_stock_repository.dart';
+import 'data/repository/kis_kr_stock_repository.dart';
 
 // ✅ US(FMP) 그대로 유지
-import 'data/us/fmp_client.dart';
-import 'data/us/us_fmp_repository.dart';
+import 'data/api/fmp_client.dart';
+import 'data/repository/us_fmp_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
