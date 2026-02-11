@@ -33,11 +33,11 @@ class UsFmpRepository implements StockRepository {
     return v;
   }
 
-  static bool _looksLikeUsTicker(String q) {
-    final t = q.trim().toUpperCase();
-    if (t.isEmpty) return false;
-    return RegExp(r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$').hasMatch(t);
-  }
+  // static bool _looksLikeUsTicker(String q) {
+  //   final t = q.trim().toUpperCase();
+  //   if (t.isEmpty) return false;
+  //   return RegExp(r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$').hasMatch(t);
+  // }
 
   static double _asDouble(dynamic v) {
     if (v == null) return 0.0;
