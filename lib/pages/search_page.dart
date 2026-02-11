@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-import '../data/stock_repository.dart';
-import '../data/favorites_store.dart';
-import '../data/recent_store.dart';
-import 'result_page.dart';
-import '../services/ad_service.dart';
-import '../widgets/ad_banner.dart';
-import '../data/repo_hub.dart';
-import '../models/market.dart';
+import 'package:stock_valuation_app/data/repository/stock_repository.dart';
+import 'package:stock_valuation_app/data/stores/favorites_store.dart';
+import 'package:stock_valuation_app/data/stores/recent_store.dart';
+import 'package:stock_valuation_app/data/stores/repo_hub.dart';
+
+import 'package:stock_valuation_app/pages/result_page.dart';
+import 'package:stock_valuation_app/services/ad_service.dart';
+import 'package:stock_valuation_app/widgets/ad_banner.dart';
+import 'package:stock_valuation_app/models/market.dart';
 
 class SearchPage extends StatefulWidget {
  final RepoHub hub;

@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'stock_repository.dart';
-import 'dart_proxy_client.dart';
+import '../api/dart_proxy_client.dart';
+import '../../utils/search_alias.dart';
 
 /// KIS(실시간 가격) + OpenDART(재무/배당)를 "Worker"를 통해 호출하는 Repository
 ///
@@ -103,12 +104,19 @@ class KisKrStockRepository implements StockRepository {
   // =========================
   @override
   Future<List<StockSearchItem>> search(String query) async {
-    final q = query.trim();
-    if (q.isEmpty) return [];
+    final raw = query.trim();
+    if (raw.isEmpty) return [];
+
+    // ✅ 한글(네이버/삼성전자 등) → 6자리 코드로 먼저 치환해서 Worker로 보냄
+    final hit = SearchAlias.resolveKr(raw);
+    final q2 = hit?.code ?? raw;
 
     final res = await _workerGet(
       '/kr/search',
-      {'q': q},
+      {
+        'q': q2,        // Worker는 query/q 둘 다 받게 만들어둠
+        'limit': '30',
+      },
       tag: 'kr/search',
     );
 
@@ -120,18 +128,28 @@ class KisKrStockRepository implements StockRepository {
     final root = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final list = (root['items'] is List) ? (root['items'] as List) : const [];
 
-    return list
+    final items = list
         .whereType<Map>()
         .map((m) {
           final mm = Map<String, dynamic>.from(m);
-          return StockSearchItem(
-            code: (mm['code'] ?? '').toString(),
-            name: (mm['name'] ?? '').toString(),
-            market: (mm['market'] ?? '').toString(),
-          );
+
+          final code = (mm['symbol'] ?? mm['code'] ?? '').toString().trim();
+          final name = (mm['nameKo'] ?? mm['name'] ?? '').toString().trim();
+          final market = (mm['exchangeShortName'] ?? mm['market'] ?? 'KRX')
+              .toString()
+              .trim();
+
+          return StockSearchItem(code: code, name: name, market: market);
         })
         .where((x) => x.code.isNotEmpty && x.name.isNotEmpty)
         .toList();
+
+    // ✅ Worker 결과가 비어도 alias는 잡힌 경우 1개라도 보여주기
+    if (items.isEmpty && hit != null) {
+      return [StockSearchItem(code: hit.code, name: hit.name, market: 'KRX')];
+    }
+
+    return items;
   }
 
   // =========================

@@ -2,20 +2,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/market.dart';
-import '../data/stores/repo_hub.dart';
-import '../data/repository/stock_repository.dart';
+import 'package:stock_valuation_app/models/market.dart';
+import 'package:stock_valuation_app/data/stores/repo_hub.dart';
+import 'package:stock_valuation_app/data/repository/stock_repository.dart';
 
-import '../data/stores/favorites_store.dart';
-import '../data/stores/stock_input_store.dart';
+import 'package:stock_valuation_app/data/stores/favorites_store.dart';
+import 'package:stock_valuation_app/data/stores/stock_input_store.dart';
 
-import '../models/valuation_result.dart';
-import '../models/valuation_rating.dart';
-import '../services/valuation_service.dart';
+import 'package:stock_valuation_app/models/valuation_result.dart';
+import 'package:stock_valuation_app/models/valuation_rating.dart';
+import 'package:stock_valuation_app/services/valuation_service.dart';
 
-import '../widgets/ad_banner.dart';
-import '../utils/finance_rules.dart';
-import '../utils/number_format.dart';
+import 'package:stock_valuation_app/widgets/ad_banner.dart';
+import 'package:stock_valuation_app/utils/finance_rules.dart';
+import 'package:stock_valuation_app/utils/number_format.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;

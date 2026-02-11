@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 import 'stock_repository.dart';
 import '../api/fmp_client.dart';
+import '../../utils/search_alias.dart';
 
 class UsFmpRepository implements StockRepository {
   final FmpClient _fmp;
@@ -92,16 +93,20 @@ class UsFmpRepository implements StockRepository {
   // -------------------------
   @override
   Future<List<StockSearchItem>> search(String query) async {
-    final q = query.trim();
-    if (q.isEmpty) return [];
+    final raw = query.trim();
+    if (raw.isEmpty) return [];
 
-    // ✅ Worker /fmp/search -> { ok:true, items:[...] } (혹은 예외적으로 List)
-    final resp = await _fmp.search(q);
+    // ✅ 한글(애플/테슬라/엔비디아 등) → 티커로 치환
+    final hit = SearchAlias.resolveUs(raw);
+    final q2 = hit?.code ?? raw;
+
+    // ✅ Worker /fmp/search 호출
+    final resp = await _fmp.search(q2);
     final itemsRaw = (resp['items'] is List) ? (resp['items'] as List) : const [];
 
     final items = <StockSearchItem>[];
     for (final e in itemsRaw) {
-      if (e is! Map) continue; // 안전 가드
+      if (e is! Map) continue;
       final m = Map<String, dynamic>.from(e);
 
       final code = (m['symbol'] ?? '').toString().trim().toUpperCase();
@@ -114,10 +119,15 @@ class UsFmpRepository implements StockRepository {
       if (items.length >= 30) break;
     }
 
-    // 검색 결과가 없는데 사용자가 티커처럼 입력한 경우 UX fallback
-    if (items.isEmpty && _looksLikeUsTicker(q)) {
-      final t = q.toUpperCase();
-      items.add(StockSearchItem(code: t, name: t, market: 'US'));
+    // ✅ alias로는 잡혔는데 FMP 검색이 비어있으면 UX fallback
+    if (items.isEmpty && hit != null) {
+      return [StockSearchItem(code: hit.code, name: hit.name, market: 'US')];
+    }
+
+    // ✅ 티커처럼 입력했는데 결과가 없으면 fallback
+    if (items.isEmpty && SearchAlias.looksLikeUsTicker(raw)) {
+      final t = raw.toUpperCase();
+      return [StockSearchItem(code: t, name: t, market: 'US')];
     }
 
     return items;
