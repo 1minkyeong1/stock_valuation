@@ -5,7 +5,7 @@
     <!-- ✅ Android 13+ 광고 ID -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
     <application
-        android:label="stock_valuation_app"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 

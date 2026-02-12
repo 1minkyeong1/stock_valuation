@@ -21,9 +21,18 @@ class ValuationService {
     //  EPS 0 이하도 허용 (throw 제거)
     // if (x.eps <= 0) throw Exception("EPS가 0 이하이면 계산이 어렵습니다.");
 
+    // roePct ROE(%) - (x.eps / x.bps) * 100.0
+    // roeOverR , fairPrice 적정주가 - x.bps * (roePct / x.rPct)
+
     final roePct = (x.eps / x.bps) * 100.0;     //  음수면 음수 그대로
     final roeOverR = roePct / x.rPct;           //  음수면 음수 그대로
     final fairPrice = x.bps * roeOverR;         //  음수 가능
+
+    // gapPct 현재가 대비 적정가 비중 (현재가 / 적정가) * 100
+    // expectedReturnPct 기대수익률 ((적정가 - 현재가) / 현재가) * 100
+    // dividendYieldPct 배당수익률 - (x.dps / x.price) * 100.0
+    // per/ 전통적가치지표 - per : x.price / x.eps (EPS 0일 때 무한대 처리), 
+    // pbr               - pbr : x.price / x.bps
 
     // ✅ fairPrice가 0이면 gapPct에서 0으로 나누기 발생 → 안전처리
     final gapPct = (fairPrice == 0)

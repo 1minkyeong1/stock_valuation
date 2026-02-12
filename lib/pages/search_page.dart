@@ -11,6 +11,7 @@ import 'package:stock_valuation_app/services/ad_service.dart';
 import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/models/market.dart';
 import 'package:stock_valuation_app/utils/search_alias.dart';
+import 'about_page.dart';
 
 class SearchPage extends StatefulWidget {
  final RepoHub hub;
@@ -687,7 +688,27 @@ class _SearchPageState extends State<SearchPage> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      appBar: AppBar(title: const Text("종목 검색")),
+      appBar: AppBar(
+        title: const Text("종목 검색"),
+        actions: [
+          IconButton(
+            tooltip: '앱 정보',
+            style: const ButtonStyle(
+              backgroundColor: WidgetStatePropertyAll(Colors.transparent),
+              overlayColor: WidgetStatePropertyAll(Colors.transparent),
+              shadowColor: WidgetStatePropertyAll(Colors.transparent),
+              surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
+            ),
+            icon: const Icon(Icons.error_outline), // ⭕ 테두리 + !
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AboutPage()),
+              );
+            },
+          ),
+        ],
+      ),
       bottomNavigationBar: const AdBanner(),
       body: SafeArea(
         child: Padding(
