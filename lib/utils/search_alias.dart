@@ -8,7 +8,7 @@ class AliasHit {
 
 class SearchAlias {
   // 한글 포함 여부
-  static bool hasHangul(String s) => RegExp(r'[가-힣]').hasMatch(s);
+  static bool hasHangul(String s) => RegExp(r'[ㄱ-ㅎㅏ-ㅣ가-힣]').hasMatch(s);
 
   /// 공백/기호 제거 + 소문자
   static String norm(String s) => s
@@ -40,11 +40,14 @@ class SearchAlias {
     'JP모건': 'JPM',
     // FMP에서 BRK.B/BRK-B 둘 다 보일 수 있음.
     // Worker가 "."를 못 받으면 여기 값을 'BRK-B'로 바꾸세요.
-    '버크셔': 'BRK.B',
+    '버크셔': 'BRK-B',
     '브로드컴': 'AVGO',
     'AMD': 'AMD',
     '인텔': 'INTC',
     '쿠팡': 'CPNG',
+    '팔란티어': 'PLTR',
+    '마이크로스트래티지': 'MSTR',
+    '아이온큐': 'IONQ',
   };
 
   static final Map<String, AliasHit> _usExact = {
@@ -64,10 +67,11 @@ class SearchAlias {
     final exact = _usExact[q];
     if (exact != null) return exact;
 
-    // partial (한글일 때만)
-    if (hasHangul(raw)) {
+    // partial (한글일 때만, 2글자 이상만)
+    if (hasHangul(raw) && q.length >= 2) {
       for (final k in _usKeysByLen) {
-        if (q.contains(k)) return _usExact[k];
+        // ✅ 사용자가 짧게 입력해도 매칭되도록 k.contains(q)
+        if (k.contains(q) || q.contains(k)) return _usExact[k];
       }
     }
     return null;
@@ -78,15 +82,10 @@ class SearchAlias {
   // -------------------------
   static const Map<String, String> krKoToCode = {
     '네이버': '035420',
-    '카카오': '035720',
-    '삼성전자': '005930',
-    'sk하이닉스': '000660',
-    '현대차': '005380',
-    '기아': '000270',
-    'LG에너지솔루션': '373220',
-    '셀트리온': '068270',
-    '삼성바이오로직스': '207940',
-    '포스코홀딩스': '005490',
+    'naver': '035420',
+    //'아크릴': '0007C0',
+
+
   };
 
   static final Map<String, AliasHit> _krExact = {
@@ -97,6 +96,8 @@ class SearchAlias {
   static final List<String> _krKeysByLen = _krExact.keys.toList()
     ..sort((a, b) => b.length.compareTo(a.length));
 
+  static const int _minPartialLen = 2;
+
   static AliasHit? resolveKr(String query) {
     final raw = query.trim();
     final q = norm(raw);
@@ -104,22 +105,26 @@ class SearchAlias {
     final exact = _krExact[q];
     if (exact != null) return exact;
 
-    if (hasHangul(raw)) {
+    if (hasHangul(raw) && q.length >= _minPartialLen) {
       for (final k in _krKeysByLen) {
-        if (q.contains(k)) return _krExact[k];
+        // ✅ 입력이 prefix일 때 매칭 (아크 → 아크릴)
+        if (k.startsWith(q) || k.contains(q)) return _krExact[k];
       }
     }
     return null;
   }
 
-  // KR 종목코드(6자리)인지
-  static bool looksLikeKrCode(String s) =>
-      RegExp(r'^\d{6}$').hasMatch(s.trim());
+  // ✅ KR 코드 통일: 6자리 숫자 + "0007C0" 같은 5숫자+영숫자1
+  static bool looksLikeKrCode(String s) {
+    final t = s.trim().toUpperCase().replaceAll(' ', '');
+    if (RegExp(r'^\d{4,6}$').hasMatch(t)) return true;       // 4~6자리 숫자
+    if (RegExp(r'^\d{5}[A-Z0-9]$').hasMatch(t)) return true; // 0007C0
+    return false;
+  }
 
-  // US 티커인지(대략)
-  static bool looksLikeUsTicker(String s) => RegExp(
-          r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$')
-      .hasMatch(s.trim().toUpperCase());
+  static bool looksLikeUsTicker(String s) =>
+      RegExp(r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$')
+          .hasMatch(s.trim().toUpperCase());
 
   static void debugLog(String msg) {
     if (kDebugMode) debugPrint('[Alias] $msg');

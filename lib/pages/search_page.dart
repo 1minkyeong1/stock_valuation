@@ -10,6 +10,7 @@ import 'package:stock_valuation_app/pages/result_page.dart';
 import 'package:stock_valuation_app/services/ad_service.dart';
 import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/models/market.dart';
+import 'package:stock_valuation_app/utils/search_alias.dart';
 
 class SearchPage extends StatefulWidget {
  final RepoHub hub;
@@ -20,35 +21,6 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
-
- // ✅ 국내 종목 영문 alias (최소 세트)
-  static const Set<String> _krAliases = {
-    'naver',
-    'samsung',
-    'samsung electronics',
-    'kakao',
-    'lg',
-    'hyundai',
-    'hynix',
-    'sk hynix',
-  };
-
-  static const Map<String, String> _krAliasToCode = {
-    'naver': '035420',
-    'samsung': '005930',
-    'samsung electronics': '005930',
-    'kakao': '035720',
-    'lg': '066570',        // LG전자 기준
-    'hyundai': '005380',   // 현대차 기준
-    'hynix': '000660',
-    'sk hynix': '000660',
-  };
-
-  String _normalizeKrQuery(String q) {
-    final t = q.trim().toLowerCase();
-    final code = _krAliasToCode[t];
-    return code ?? q.trim();
-  }
 
   final _controller = TextEditingController();
   final _searchFocus = FocusNode(); //  포커스 유지용
@@ -103,16 +75,22 @@ class _SearchPageState extends State<SearchPage> {
     setState(() => _recents = r);
   }
 
+  bool _isComposing() {
+    final c = _controller.value.composing;
+    return c.isValid && !c.isCollapsed;
+  }
+
   // =========================
-  // ✅ 자동검색: 디바운스
+  // ✅ 자동검색: 디바운스 (IME 조합 대응)
   // =========================
   void _onChanged(String v) {
-    final q = v.trim();
-
     _debounce?.cancel();
 
-   if (q.isEmpty) {
+    final q = v.trim();
+
+    if (q.isEmpty) {
       _searchSeq++; // 이전 검색 무효화
+      if (!mounted) return;
       setState(() {
         _results = [];
         _loading = false;
@@ -121,34 +99,58 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
 
-   // 현재 시점의 시퀀스를 캡처하여 타이머에 전달
-    _searchSeq++; 
+    _searchSeq++;
     final int mySeq = _searchSeq;
 
-    _debounce = Timer(const Duration(milliseconds: 250), () {
-      _runSearch(keyword: q, mySeq: mySeq);
-    });
+    // ✅ 조합이 끝날 때까지 기다렸다가 자동검색 실행
+    void schedule(int waitMs, int attemptsLeft) {
+      _debounce?.cancel();
+      _debounce = Timer(Duration(milliseconds: waitMs), () {
+        if (!mounted) return;
+        if (mySeq != _searchSeq) return; // 더 최신 입력이 있으면 중단
+
+        // 최신 텍스트로 검색(캡쳐된 q 말고 현재값 사용)
+        final latest = _controller.text.trim();
+        if (latest.isEmpty) return;
+
+        // 아직 한글 조합 중이면 조금 더 기다림 (최대 몇 번만)
+        if (_isComposing() && attemptsLeft > 0) {
+          schedule(80, attemptsLeft - 1);
+          return;
+        }
+
+        // ✅ 조합이 끝났거나(또는 너무 오래 조합이면) 검색 실행
+        _runSearch(keyword: latest, mySeq: mySeq);
+      });
+    }
+
+    // 180ms 디바운스 + 조합이면 120ms 간격으로 최대 8번 더 대기(약 1초)
+    schedule(180, 8);
   }
 
-    bool _looksLikeKrQuery(String q) {
-      final s = q.trim();
-      if (s.isEmpty) return false;
+  bool _looksLikeKrQuery(String q) {
+    final s = q.trim();
+    if (s.isEmpty) return false;
 
-      // 1) 한글 → 국내
-      if (RegExp(r'[가-힣]').hasMatch(s)) return true;
+    // 1) 한글(자모 포함) → 국내로 간주
+    if (RegExp(r'[ㄱ-ㅎㅏ-ㅣ가-힣]').hasMatch(s)) return true;
 
-      // 2) 숫자 4~6자리 → 국내 코드
-      if (RegExp(r'^\d{4,6}$').hasMatch(s.replaceAll(' ', ''))) return true;
+    // 2) 숫자/영숫자 코드 → 국내로 간주
+    final up = s.replaceAll(' ', '').toUpperCase();
 
-      // 3) 영문 alias → 국내
-      final t = s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
-      return _krAliases.contains(t);
-    }
+    // 2-1) 숫자 4~6자리
+    if (RegExp(r'^\d{4,6}$').hasMatch(up)) return true;
 
-    bool _looksLikeUsTicker(String q) {
-      final t = q.trim().toUpperCase();
-      return RegExp(r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$').hasMatch(t);
-    }
+    // 2-2) 국내 단축코드(예: 0007C0) = 앞이 숫자인 6자리
+    if (RegExp(r'^\d{5}[0-9A-Z]$').hasMatch(up)) return true;
+
+    return false;
+  }
+
+  bool _looksLikeUsTicker(String q) {
+    final t = q.trim().toUpperCase();
+    return RegExp(r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$').hasMatch(t);
+  }
 
   // =========================
   // ✅ 검색: 돋보기/엔터로 즉시 검색
@@ -179,53 +181,60 @@ class _SearchPageState extends State<SearchPage> {
       _error = null;
     });
 
-    // ✅ 탭 분리: US 탭에서 KR 입력 차단, KR 탭에서 US 티커 차단
-    if (_tab == Market.us && _looksLikeKrQuery(q)) {
-      // ✅ 자동으로 국내로 전환해서 검색
-      setState(() => _tab = Market.kr);
-
-      // 탭별 즐겨찾기/최근 다시 로드(선택: UX 좋아짐)
-      await _loadFav();
-      await _loadRecents();
-
-      // IMPORTANT: seq 갱신(탭 전환이므로 새 요청으로 취급)
-      final int nextSeq = ++_searchSeq;
-
-      // KR로 검색 재호출
-      await _runSearch(keyword: q, mySeq: nextSeq);
-      return;
-    }
-
-    if (_tab == Market.kr && _looksLikeUsTicker(q) && !_looksLikeKrQuery(q)) {
-      if (!mounted) return;
-      if (seq != _searchSeq) return;
-
-      setState(() {
-        _loading = false;
-        _results = [];
-        _error = "국내 탭에서는 미국 티커 검색을 지원하지 않습니다. ‘미국’ 탭에서 검색해 주세요.";
-      });
-      FocusScope.of(context).requestFocus(_searchFocus);
-      return;
-    }
-
     try {
-      // 디버깅
-      debugPrint('[Search] tab=$_tab q="$q"');
+      // ✅ 탭에 맞게 쿼리 변환(US: 한글->티커, KR: 한글->코드)
+      final mapped = _mapQueryByTab(_tab, q);
 
-      final q2 = (_tab == Market.kr) ? _normalizeKrQuery(q) : q;
-      final r = await widget.hub.search(_tab, q2);
+      debugPrint('[Search] tab=$_tab q="$q" mapped="$mapped"');
+
+      // ✅ (추가) US 탭에서 "국내로 보이는" 입력인데 US alias 변환이 안 된 경우 → 안내만
+      if (_tab == Market.us) {
+        final usHit = SearchAlias.resolveUs(q);
+        final bool looksKr = _looksLikeKrQuery(q) || SearchAlias.looksLikeKrCode(q);
+
+        // US로 매핑이 안 됐고, KR처럼 보이면: 자동전환 X, 안내만
+        if (usHit == null && looksKr) {
+          if (!mounted) return;
+          if (seq != _searchSeq) return;
+
+          setState(() {
+            _loading = false;
+            _results = [];
+            _error = "국내 종목으로 보입니다. ‘국내’ 탭에서 검색해 주세요.";
+          });
+          FocusScope.of(context).requestFocus(_searchFocus);
+          return;
+        }
+      }
+
+      // ✅ KR 탭에서 미국 티커 형태는 차단(자동 전환 X)
+      if (_tab == Market.kr &&
+          _looksLikeUsTicker(mapped) &&
+          !SearchAlias.looksLikeKrCode(mapped)) {
+        if (!mounted) return;
+        if (seq != _searchSeq) return;
+
+        setState(() {
+          _loading = false;
+          _results = [];
+          _error = "국내 탭에서는 미국 티커 검색을 지원하지 않습니다. ‘미국’ 탭에서 검색해 주세요.";
+        });
+        FocusScope.of(context).requestFocus(_searchFocus);
+        return;
+      }
+
+      // ✅ 검색은 딱 1번만
+      final r = await widget.hub.search(_tab, mapped);
 
       if (!mounted) return;
       if (seq != _searchSeq) return;            // 최신 요청 아니면 폐기
-      if (_controller.text.trim() != q) return; // 사용자가 입력을 바꾼 경우만 폐기
+      if (_controller.text.trim() != q) return; // 입력이 바뀌면 폐기
 
       setState(() {
         _results = r;
         _loading = false;
       });
 
-      // ✅ 검색 후에도 키보드 유지(원하면)
       FocusScope.of(context).requestFocus(_searchFocus);
     } catch (e) {
       if (!mounted) return;
@@ -252,6 +261,36 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     FocusScope.of(context).requestFocus(_searchFocus);
+  }
+
+  String _mapQueryByTab(Market tab, String q) {
+    final raw = q.trim();
+    if (raw.isEmpty) return raw;
+
+    if (tab == Market.kr) {
+      // ✅ (중요) 한글/별칭 → 코드 치환 제거
+      // final hit = SearchAlias.resolveKr(raw);
+      // if (hit != null) return hit.code;
+
+      // 1) 숫자 4~6자리면 6자리로 패딩
+      final digits = raw.replaceAll(' ', '');
+      if (RegExp(r'^\d{4,6}$').hasMatch(digits)) {
+        return digits.padLeft(6, '0');
+      }
+
+      // 2) 0007C0 같은 영숫자 6자리면 대문자
+      final up = raw.replaceAll(' ', '').toUpperCase();
+      if (RegExp(r'^[0-9A-Z]{6}$').hasMatch(up)) return up;
+
+      // 3) 그 외(한글/부분검색)는 그대로
+      return raw;
+    }
+
+    // tab == Market.us
+    final hit = SearchAlias.resolveUs(raw);
+    if (hit != null) return hit.code;
+
+    return raw.toUpperCase();
   }
 
   // =========================
