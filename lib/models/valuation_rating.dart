@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 enum RatingLevel { strongBuy, buy, neutral, caution, avoid }
 
 class ValuationRating {
@@ -12,10 +14,20 @@ class ValuationRating {
   /// 체크리스트(왜 그런 판단인지)
   final List<String> bullets;
 
+  // ✅ 추가: UI 컬러 세트
+  final Color? bg;
+  final Color? border;
+  final Color? accent;
+
   const ValuationRating({
     required this.level,
     required this.title,
     required this.summary,
     required this.bullets,
+
+    // ✅ 추가
+    required this.bg,
+    required this.border,
+    required this.accent,
   });
 }

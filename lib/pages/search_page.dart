@@ -475,48 +475,60 @@ class _SearchPageState extends State<SearchPage> {
   // UI 조각들
   // =========================
   Widget _marketTabs() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: SegmentedButton<Market>(
-                segments: const [
-                  ButtonSegment(value: Market.kr, label: Text("국내")),
-                  ButtonSegment(value: Market.us, label: Text("미국")),
-                ],
-                selected: {_tab},
-                onSelectionChanged: (s) async {
-                  final next = s.first;
-
-                  //  탭 변경
-                  setState(() => _tab = next);
-
-                  //  탭별 최근/즐겨찾기 다시 불러오기
-                  await _loadFav();
-                  await _loadRecents();
-
-                  //  탭 변경 시 현재 검색어가 있으면 다시 검색
-                  final q = _controller.text.trim();
-                  if (q.isNotEmpty) {
-                    await _runSearch(keyword: q);
-                  } else {
-                    if (!mounted) return;
-                    setState(() {
-                      _results = [];
-                      _loading = false;
-                      _error = null;
-                    });
-                  }
-
-                  if (!mounted) return;
-                  FocusScope.of(context).requestFocus(_searchFocus);
-                },
+    return _leftAccentCard(
+      color: _accent2,
+      child: Row(
+        children: [
+          Expanded(
+            child: SegmentedButton<Market>(
+              segments: const [
+                ButtonSegment(value: Market.kr, label: Text("국내")),
+                ButtonSegment(value: Market.us, label: Text("미국")),
+              ],
+              selected: {_tab},
+              style: ButtonStyle(
+                // 선택/비선택 배경
+                backgroundColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.selected)) return _accent2.withAlpha(35);
+                  return Colors.white.withAlpha(120);
+                }),
+                // 테두리
+                side: WidgetStatePropertyAll(BorderSide(color: _accent2.withAlpha(80))),
+                // 글자색
+                foregroundColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.selected)) return _accent2;
+                  return Colors.black87;
+                }),
+                // 살짝 둥글게
+                shape: WidgetStatePropertyAll(
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
               ),
+              onSelectionChanged: (s) async {
+                final next = s.first;
+
+                setState(() => _tab = next);
+                await _loadFav();
+                await _loadRecents();
+
+                final q = _controller.text.trim();
+                if (q.isNotEmpty) {
+                  await _runSearch(keyword: q);
+                } else {
+                  if (!mounted) return;
+                  setState(() {
+                    _results = [];
+                    _loading = false;
+                    _error = null;
+                  });
+                }
+
+                if (!mounted) return;
+                FocusScope.of(context).requestFocus(_searchFocus);
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -534,12 +546,24 @@ class _SearchPageState extends State<SearchPage> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: c.withAlpha(30),
+            color: c.withAlpha(24),
             borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: c.withAlpha(80)),
           ),
-          child: Text(
-            title,
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: c),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: c.withAlpha(200), shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: c),
+              ),
+            ],
           ),
         ),
         const Spacer(),
@@ -561,7 +585,8 @@ class _SearchPageState extends State<SearchPage> {
         width: 180,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
+          color: _accent.withAlpha(10),
+          border: Border.all(color: _accent.withAlpha(55)),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -573,10 +598,10 @@ class _SearchPageState extends State<SearchPage> {
             Text(s.market, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
             const Spacer(),
             Row(
-              children: const [
-                Text("평가 보기", style: TextStyle(fontSize: 12)),
-                SizedBox(width: 4),
-                Icon(Icons.chevron_right, size: 16),
+              children: [
+                const Text("평가 보기", style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 16, color: _accent.withAlpha(220)),
               ],
             ),
           ],
@@ -588,31 +613,32 @@ class _SearchPageState extends State<SearchPage> {
   Widget _resultCardTile(StockSearchItem s) {
     return InkWell(
       onTap: () => _openResult(s, recordRecent: true),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: Colors.grey.shade200,
-                child: const Icon(Icons.corporate_fare, color: Colors.black54),
+      child: _leftAccentCard(
+        color: _accent2,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: _accent2.withAlpha(20),
+              child: Icon(Icons.corporate_fare, color: _accent2.withAlpha(220)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(
+                    "${s.code} · ${s.market}",
+                    style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 2),
-                    Text("${s.code} · ${s.market}",
-                        style: TextStyle(color: Colors.grey[700], fontSize: 12)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right),
-            ],
-          ),
+            ),
+            Icon(Icons.chevron_right, color: _accent2.withAlpha(220)),
+          ],
         ),
       ),
     );
@@ -620,24 +646,27 @@ class _SearchPageState extends State<SearchPage> {
 
   // ✅ 검색창: 큰 버튼 제거 + 돋보기(수동검색) + 자동검색(onChanged)
   Widget _searchBox() {
-  return Card(
-    child: Padding(
-      padding: const EdgeInsets.all(12),
+    return _leftAccentCard(
+      color: _accent,
       child: Column(
         children: [
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: _controller,
             builder: (context, v, child) {
               final hasText = v.text.trim().isNotEmpty;
+
               return TextField(
                 key: const ValueKey('searchField'),
                 controller: _controller,
                 focusNode: _searchFocus,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white.withAlpha(180),
                   hintText: _tab == Market.kr
-                      ? "국내 종목명 또는 코드 입력 (예: 삼성전자 / 005930)"
-                      : "미국 티커 입력 (예: AAPL / TSLA)",
+                      ? "국내 종목명 또는 코드 (예: 삼성전자 / 005930)"
+                      : "미국 티커 (예: AAPL / TSLA)",
+                  prefixIcon: Icon(Icons.search, color: _accent.withAlpha(220)),
                   suffixIcon: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -645,16 +674,27 @@ class _SearchPageState extends State<SearchPage> {
                         IconButton(
                           tooltip: "지우기",
                           onPressed: _clearSearch,
-                          icon: const Icon(Icons.close),
+                          icon: Icon(Icons.close, color: Colors.grey[700]),
                         ),
                       IconButton(
                         tooltip: "검색",
                         onPressed: hasText ? _runSearch : null,
-                        icon: const Icon(Icons.search),
+                        icon: Icon(Icons.search, color: _accent.withAlpha(230)),
                       ),
                     ],
                   ),
-                  border: const OutlineInputBorder(),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: _accent.withAlpha(70)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: _accent.withAlpha(60)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: _accent.withAlpha(160), width: 1.5),
+                  ),
                 ),
                 onChanged: _onChanged,
                 onSubmitted: (_) => _runSearch(),
@@ -662,20 +702,30 @@ class _SearchPageState extends State<SearchPage> {
             },
           ),
           const SizedBox(height: 10),
-            Row(
+
+          // ✅ 안내 배너 (살짝 화려한 톤)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: _accent.withAlpha(18),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _accent.withAlpha(55)),
+            ),
+            child: Row(
               children: [
-                Icon(Icons.info_outline, size: 16, color: Colors.grey[700]),
-                const SizedBox(width: 6),
+                Icon(Icons.auto_awesome, size: 18, color: _accent.withAlpha(220)),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     "자동검색이 되며, 필요하면 오른쪽 돋보기로 즉시 검색할 수 있어요.",
-                    style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                    style: TextStyle(color: Colors.grey[800], fontSize: 12),
                   ),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -689,7 +739,10 @@ class _SearchPageState extends State<SearchPage> {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        title: const Text("종목 검색"),
+        title: const Text(
+          "종목 검색",
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+        ),
         actions: [
           IconButton(
             tooltip: '앱 정보',
@@ -711,30 +764,33 @@ class _SearchPageState extends State<SearchPage> {
       ),
       bottomNavigationBar: const AdBanner(),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            children: [
-              _marketTabs(),
-              const SizedBox(height: 10),
-              _searchBox(),
-              const SizedBox(height: 10),
+        child: Container(
+          color: _accent.withAlpha(8), // ✅ 페이지 전체 배경 틴트
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                _marketTabs(),
+                const SizedBox(height: 10),
+                _searchBox(),
+                const SizedBox(height: 10),
 
-              if (_loading) const LinearProgressIndicator(),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                if (_loading) const LinearProgressIndicator(),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                  ),
+
+                const SizedBox(height: 10),
+
+                Expanded(
+                  child: showHistory ? _historyList() : _resultList(),
                 ),
-
-              const SizedBox(height: 10),
-
-              Expanded(
-                child: showHistory ? _historyList() : _resultList(),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ),  
       ),
     );
   }
@@ -828,13 +884,19 @@ class _SearchPageState extends State<SearchPage> {
     required String desc,
   }) {
     return Card(
+      elevation: 0,
+      color: _tintBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: _tintBorder),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: Colors.grey.shade200,
-              child: Icon(icon, color: Colors.black54),
+              backgroundColor: _accent.withAlpha(18),
+              child: Icon(icon, color: _accent.withAlpha(230)),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -848,6 +910,43 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // =========================
+  // 🎨 SearchPage UI Palette
+  // =========================
+  Color get _accent => _tab == Market.us ? Colors.blue : Colors.green;
+  Color get _accent2 => _tab == Market.us ? Colors.indigo : Colors.teal;
+  Color get _tintBg => _accent.withAlpha(12);
+  Color get _tintBorder => _accent.withAlpha(55);
+
+  BoxDecoration _softCardDeco({Color? color}) => BoxDecoration(
+    color: (color ?? _accent).withAlpha(12),
+    borderRadius: BorderRadius.circular(16),
+    border: Border.all(color: (color ?? _accent).withAlpha(55)),
+  );
+
+  // 공통 “왼쪽 포인트 라인 카드”
+  Widget _leftAccentCard({
+    required Widget child,
+    Color? color,
+    EdgeInsets padding = const EdgeInsets.all(12),
+  }) {
+    final c = color ?? _accent;
+    return Card(
+      elevation: 0,
+      color: Colors.transparent,
+      child: Container(
+        decoration: _softCardDeco(color: c),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border(left: BorderSide(color: c.withAlpha(170), width: 4)),
+          ),
+          child: Padding(padding: padding, child: child),
         ),
       ),
     );

@@ -17,6 +17,8 @@ import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/utils/finance_rules.dart';
 import 'package:stock_valuation_app/utils/number_format.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
   final StockSearchItem item;
@@ -343,6 +345,49 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  Future<void> _openNaverFinanceForCurrent() async {
+    debugPrint('[NAVER] market=${widget.market} code=${widget.item.code}');
+
+    final raw = widget.item.code.trim();
+    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+
+    // ✅ 국내: 숫자 6자리면 종목 페이지를 "외부(새창)"로
+    if (digits.length == 6) {
+      final url = 'https://finance.naver.com/item/main.naver?code=$digits';
+      final ok = await _openExternal(url);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('네이버증권(국내)을 열 수 없습니다.')),
+        );
+      }
+      return;
+    }
+
+    // ✅ 해외: 종목 매칭 안 함 → USA 해외주식 화면을 "외부(새창)"로
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('해외는 네이버 해외주식에서 티커로 검색해서 확인하세요.')),
+      );
+    }
+
+    const url = 'https://m.stock.naver.com/worldstock/home/USA/discussion/ranking';
+    final ok = await _openExternal(url);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('네이버 해외주식(USA) 화면을 열 수 없습니다.')),
+      );
+    }
+  }
+
+  Future<bool> _openExternal(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ---------- Rating UI ----------
   IconData _ratingIcon(RatingLevel level) {
     switch (level) {
@@ -370,9 +415,22 @@ class _ResultPageState extends State<ResultPage> {
       case RatingLevel.caution:
         return Colors.orange;
       case RatingLevel.avoid:
-        return Colors.red;
-    }
+        return Colors.red;        
+    } 
   }
+
+  Color get _accent    => widget.market == Market.us ? Colors.blue : Colors.green;
+  Color get _cHeader   => widget.market == Market.us ? Colors.indigo : Colors.teal;
+  Color get _cInput    => widget.market == Market.us ? Colors.blue   : Colors.green;
+  Color get _cResult   => widget.market == Market.us ? Colors.purple : Colors.deepPurple;
+  Color get _cKpi      => widget.market == Market.us ? Colors.cyan   : Colors.lightBlue;
+  Color get _cInfo     => widget.market == Market.us ? Colors.orange : Colors.amber;
+
+  BoxDecoration _cardDeco(Color c) => BoxDecoration(
+    color: c.withAlpha(16),
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: c.withAlpha(55)),
+  );
 
   // ---------- UI ----------
   @override
@@ -384,15 +442,29 @@ class _ResultPageState extends State<ResultPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text("$name 평가"),
+        backgroundColor: _accent.withAlpha(18),
+        elevation: 0,
         actions: [
           IconButton(
-            icon: Icon(_isFav ? Icons.star : Icons.star_border),
+            icon: Icon(
+              _isFav ? Icons.star : Icons.star_border,
+              color: _isFav ? Colors.amber : null, // ⭐ 
+            ),
             onPressed: _toggleFavorite,
           ),
           IconButton(
             tooltip: _showAdvanced ? "고급보기 숨기기" : "고급보기 보기",
             icon: Icon(_showAdvanced ? Icons.visibility : Icons.visibility_off),
             onPressed: () => setState(() => _showAdvanced = !_showAdvanced),
+          ),
+          // 네이버증권 바로가기
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _openNaverFinanceForCurrent,
+              style: TextButton.styleFrom(foregroundColor: _accent),
+              label: Text(widget.market == Market.kr ? 'N증권' : 'N해외검색'),
+            ),
           ),
         ],
       ),
@@ -485,46 +557,54 @@ class _ResultPageState extends State<ResultPage> {
 
   Widget _headerCard(String name, String code) {
     final marketText = (widget.market == Market.kr) ? "KR" : "US";
-
     final f = _fundamentals ?? _initF;
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "$name ($code) · $marketText",
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-
-            Text(
+      elevation: 0,
+      color: Colors.transparent,
+      child: Container(
+        decoration: _cardDeco(_cHeader),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border(left: BorderSide(color: _cHeader.withAlpha(170), width: 4)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "$name ($code) · $marketText",
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
                   (widget.market == Market.kr)
                       ? "데이터 출처: 한국투자증권(KIS) 실시간 시세 + OpenDART 재무"
                       : "데이터 출처: FMP (Financial Modeling Prep)",
                   style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
+                const SizedBox(height: 6),
 
-            const SizedBox(height: 6),
+                if (f.basDt != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    "재무 기준일: ${_fmtBasDt(f.basDt!)}",
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
 
-            if (f.basDt != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                "재무 기준일: ${_fmtBasDt(f.basDt!)}",
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
-
-            if (_priceBasDt != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                "가격 기준일: ${_fmtBasDt(_priceBasDt!)}",
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
-          ],
+                if (_priceBasDt != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    "가격 기준일: ${_fmtBasDt(_priceBasDt!)}",
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -728,9 +808,11 @@ class _ResultPageState extends State<ResultPage> {
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: inputFormatters,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: "직접 입력 가능",
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            filled: true,
+            fillColor: Colors.white.withAlpha(200),
           ),
           onChanged: onChanged,
         ),
@@ -814,64 +896,126 @@ class _ResultPageState extends State<ResultPage> {
 
   Widget _inputCard() {
     return Card(
+      color: _cInput.withAlpha(14),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: _cInput.withAlpha(55)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    "입력값",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            // ✅ 헤더를 살짝 분리(배경 + 둥근 모서리)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(160),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _cInput.withAlpha(35)),
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      "입력값",
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                ),
-                TextButton(onPressed: _resetToInitial, child: const Text("초기화")),
-              ],
+                  TextButton(
+                    onPressed: _resetToInitial,
+                    style: TextButton.styleFrom(foregroundColor: _cInput),
+                    child: const Text("초기화"),
+                  ),
+                ],
+              ),
             ),
+
             const SizedBox(height: 10),
 
-              if (_parseDouble(_priceCtrl) == 0.0)    // -------------------변경
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8),
-                child: Text(
+            if (_parseDouble(_priceCtrl) == 0.0)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withAlpha(18),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.withAlpha(60)),
+                ),
+                child: const Text(
                   "현재가 데이터를 가져오지 못했습니다. 직접 입력해도 계산은 가능합니다.",
                   style: TextStyle(fontSize: 12, color: Colors.red),
                 ),
               ),
 
-            _numField( label: _priceUnitText, controller: _priceCtrl, onChanged: (_) => _onAnyInputChanged(), inputFormatters: [widget.market == Market.us ? _priceFormatterUs : _priceFormatterKr,],),
+            const SizedBox(height: 10),
+
+            _numField(
+              label: _priceUnitText,
+              controller: _priceCtrl,
+              onChanged: (_) => _onAnyInputChanged(),
+              inputFormatters: [
+                widget.market == Market.us ? _priceFormatterUs : _priceFormatterKr,
+              ],
+            ),
             const SizedBox(height: 8),
-            _numFieldWithAutoBadge(label: "EPS", controller: _epsCtrl, onChanged: (_) => _onAnyInputChanged()),
+
+            _numFieldWithAutoBadge(
+              label: "EPS",
+              controller: _epsCtrl,
+              onChanged: (_) => _onAnyInputChanged(),
+            ),
             _metricHint(_metricLabelFor('EPS')),
             const SizedBox(height: 8),
-            _numFieldWithAutoBadge(label: "BPS", controller: _bpsCtrl, onChanged: (_) => _onAnyInputChanged()),
+
+            _numFieldWithAutoBadge(
+              label: "BPS",
+              controller: _bpsCtrl,
+              onChanged: (_) => _onAnyInputChanged(),
+            ),
             _metricHint(_metricLabelFor('BPS')),
             const SizedBox(height: 8),
-            _numFieldWithAutoBadge(label: "DPS", controller: _dpsCtrl, onChanged: (_) => _onAnyInputChanged()),
+
+            _numFieldWithAutoBadge(
+              label: "DPS",
+              controller: _dpsCtrl,
+              onChanged: (_) => _onAnyInputChanged(),
+            ),
             _metricHint(_metricLabelFor('DPS')),
 
             const SizedBox(height: 14),
             const Text("요구수익률 r(%)", style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
+
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text("r = ${rPct.toStringAsFixed(1)}%"),
-                Text("(ROE/r로 적정 PBR 결정)", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                const Text("(ROE/r로 적정 PBR 결정)",
+                    style: TextStyle(color: Colors.grey, fontSize: 12)),
               ],
             ),
-            Slider(
-              value: rPct,
-              min: 5,
-              max: 20,
-              divisions: 150,
-              label: "${rPct.toStringAsFixed(1)}%",
-              onChanged: (v) {
-                setState(() => rPct = v);
-                _scheduleSaveInputs();
-              },
+
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: _accent.withAlpha(200),
+                inactiveTrackColor: _accent.withAlpha(60),
+                thumbColor: _accent.withAlpha(220),
+                overlayColor: _accent.withAlpha(30),
+                valueIndicatorColor: _accent.withAlpha(220),
+              ),
+              child: Slider(
+                value: rPct,
+                min: 5,
+                max: 20,
+                divisions: 150,
+                label: "${rPct.toStringAsFixed(1)}%",
+                onChanged: (v) {
+                  setState(() => rPct = v);
+                  _scheduleSaveInputs();
+                },
+              ),
             ),
           ],
         ),
@@ -879,29 +1023,41 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  // 아래 2개는 기존 프로젝트에 이미 있는 형태일 가능성이 높아서
-  // "변수명 유지" 조건을 위해 최소 형태로만 제공합니다.
-  // (원래 쓰던 UI가 있으면 그대로 붙여쓰셔도 됩니다.)
-
+  // 고급 작은카드
   Widget _ratingCardCompact(ValuationRating rating) {
-    final c = _ratingColor(rating.level);
+    final a = rating.accent ?? _ratingColor(rating.level);
+    final bg = rating.bg ?? a.withAlpha(6);
+    final br = rating.border ?? a.withAlpha(60);
+
     return Card(
+      color: bg,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: br),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: c.withAlpha(30),
-              child: Icon(_ratingIcon(rating.level), color: c),
+              backgroundColor: a.withAlpha(30),
+              child: Icon(_ratingIcon(rating.level), color: a),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(rating.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    rating.title,
+                    style: TextStyle(fontWeight: FontWeight.bold, color: a),
+                  ),
                   const SizedBox(height: 2),
-                  Text(rating.summary, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  Text(
+                    rating.summary,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
                 ],
               ),
             ),
@@ -911,32 +1067,59 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 초급 큰카드
   Widget _ratingCardLarge(ValuationRating rating) {
-    final c = _ratingColor(rating.level);
+    final a = rating.accent ?? _ratingColor(rating.level);
+    final bg = rating.bg ?? a.withAlpha(14);
+    final br = rating.border ?? a.withAlpha(60);
+
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: c.withAlpha(30),
-                  child: Icon(_ratingIcon(rating.level), color: c),
-                ),
-                const SizedBox(width: 10),
-                Text(rating.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(rating.summary),
-            const SizedBox(height: 10),
-            ...rating.bullets.map((b) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
+      color: bg,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: br),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border(left: BorderSide(color: a.withAlpha(170), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: a.withAlpha(30),
+                    child: Icon(_ratingIcon(rating.level), color: a),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    rating.title,
+                    style: TextStyle(fontWeight: FontWeight.w800, color: a),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(rating.summary),
+              const SizedBox(height: 10),
+              ...rating.bullets.map(
+                (b) => Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: a.withAlpha(10),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: a.withAlpha(30)),
+                  ),
                   child: Text(b),
-                )),
-          ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1085,7 +1268,8 @@ String _fmtMoney(num v) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
+        color: _cKpi.withAlpha(12),
+        border: Border.all(color: _cKpi.withAlpha(60)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1098,7 +1282,7 @@ String _fmtMoney(num v) {
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
-              color: valueColor,
+              color: valueColor ?? Colors.black,
             ),
           ),
           if (subtitle != null) ...[
@@ -1128,7 +1312,8 @@ String _fmtMoney(num v) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
+        color: _cInfo.withAlpha(12),
+        border: Border.all(color: _cInfo.withAlpha(60)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1213,12 +1398,31 @@ String _fmtMoney(num v) {
   // (하단) 고급용 설명 UI
   Widget _sectionCard(String title, List<Widget> children) {
     return Card(
+      elevation: 0,
+      color: _cResult.withAlpha(12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: _cResult.withAlpha(60)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _cResult.withAlpha(180),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              ],
+            ),
             const SizedBox(height: 10),
             ...children,
           ],

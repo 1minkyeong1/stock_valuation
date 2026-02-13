@@ -1,5 +1,6 @@
 import '../models/valuation_result.dart';
 import '../models/valuation_rating.dart';
+import 'package:flutter/material.dart';
 
 
 class ValuationInput {
@@ -102,6 +103,42 @@ class ValuationService {
       bullets.add("⛔ 기대수익: 적정가 기준으로 ${r.expectedReturnPct.toStringAsFixed(0)}% (비쌈)");
     }
 
+     // ✅ 여기 추가: 레벨별 컬러 세트
+    ({Color bg, Color border, Color accent}) palette(RatingLevel level) {
+      switch (level) {
+        case RatingLevel.strongBuy:
+          return (
+            bg: Colors.red.withAlpha(16),
+            border: Colors.red.withAlpha(70),
+            accent: Colors.red.withAlpha(220),
+          );
+        case RatingLevel.buy:
+          return (
+            bg: Colors.green.withAlpha(14),
+            border: Colors.green.withAlpha(70),
+            accent: Colors.green.withAlpha(220),
+          );
+        case RatingLevel.neutral:
+          return (
+            bg: Colors.blueGrey.withAlpha(12),
+            border: Colors.blueGrey.withAlpha(60),
+            accent: Colors.blueGrey.withAlpha(200),
+          );
+        case RatingLevel.caution:
+          return (
+            bg: Colors.orange.withAlpha(16),
+            border: Colors.orange.withAlpha(80),
+            accent: Colors.orange.withAlpha(220),
+          );
+        case RatingLevel.avoid:
+          return (
+            bg: Colors.purple.withAlpha(14),
+            border: Colors.purple.withAlpha(70),
+            accent: Colors.purple.withAlpha(220),
+          );
+      }
+    }
+
     // --------------------------
     // ✅ 5단계 최종 판정 룰(초보용)
     // - strongBuy: 매우 저평가 + ROE/r 아주 좋음 + 기대수익 충분
@@ -126,47 +163,72 @@ class ValuationService {
     final isNegative = r.expectedReturnPct < 0;
     final isVeryNegative = r.expectedReturnPct < -10;
 
+     // ✅ strongBuy
     if (isVeryCheap && isVeryStrong && (isHighUpside || isUpside)) {
+      final p = palette(RatingLevel.strongBuy);
       return ValuationRating(
         level: RatingLevel.strongBuy,
         title: "강력매수",
         summary: "가격이 충분히 싸고(저평가), ROE가 목표수익률을 크게 상회합니다.",
         bullets: bullets,
+        bg: p.bg,
+        border: p.border,
+        accent: p.accent,
       );
     }
 
+    // ✅ buy
     if (isCheap && isStrong && !isNegative) {
+      final p = palette(RatingLevel.buy);
       return ValuationRating(
         level: RatingLevel.buy,
         title: "매수",
         summary: "저평가 구간이며, ROE가 목표수익률보다 높습니다.",
         bullets: bullets,
+        bg: p.bg,
+        border: p.border,
+        accent: p.accent,
       );
     }
 
+    // ✅ avoid
     if (isVeryExpensive || isVeryWeak || isVeryNegative) {
+      final p = palette(RatingLevel.avoid);
       return ValuationRating(
         level: RatingLevel.avoid,
         title: "피하기",
         summary: "매우 비싸거나(또는) ROE가 목표수익률을 크게 못 미칩니다.",
         bullets: bullets,
+        bg: p.bg,
+        border: p.border,
+        accent: p.accent,
       );
     }
 
+    // ✅ caution
     if (isExpensive || isWeak) {
+      final p = palette(RatingLevel.caution);
       return ValuationRating(
         level: RatingLevel.caution,
         title: "주의",
         summary: "가격이 비싸거나 ROE가 목표수익률보다 낮습니다.",
         bullets: bullets,
+        bg: p.bg,
+        border: p.border,
+        accent: p.accent,
       );
     }
 
+    // ✅ neutral
+    final p = palette(RatingLevel.neutral);
     return ValuationRating(
       level: RatingLevel.neutral,
       title: "중립",
       summary: "적정가 근처이거나 판단이 애매한 구간입니다.",
       bullets: bullets,
+      bg: p.bg,
+      border: p.border,
+      accent: p.accent,
     );
   }
 }
