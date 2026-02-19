@@ -20,11 +20,15 @@ class AdService {
   InterstitialAd? _interstitial;
   bool _loadingInterstitial = false;
 
-  /// ✅ 릴리즈에서도 테스트광고 강제:
-  /// flutter run --release --dart-define=TEST_ADS=true
+  // ✅ retry/backoff
+  int _retryAttempt = 0;
+  Timer? _retryTimer;
+
+  // ✅ eligible인데 광고 없으면, 로드되면 바로 show
+  bool _pendingShow = false;
+
   static const bool _forceTestAds =
       bool.fromEnvironment('TEST_ADS', defaultValue: false);
-
   bool get _useTestAds => _forceTestAds || !kReleaseMode;
 
   // ------------------------------------------------------------
@@ -42,81 +46,25 @@ class AdService {
   static const String _iosInterstitialTest = 'ca-app-pub-3940256099942544/4411468910';
 
   String get bannerUnitId {
-    if (_useTestAds) {
-      return Platform.isAndroid ? _androidBannerTest : _iosBannerTest;
-    }
+    if (_useTestAds) return Platform.isAndroid ? _androidBannerTest : _iosBannerTest;
     if (Platform.isAndroid) return _androidBannerProd;
-
-    // iOS 아직 없으면 일단 테스트ID로 둬도 OK (iOS 빌드할 때 교체)
     return _iosBannerTest;
   }
 
   String get interstitialUnitId {
-    if (_useTestAds) {
-      return Platform.isAndroid ? _androidInterstitialTest : _iosInterstitialTest;
-    }
+    if (_useTestAds) return Platform.isAndroid ? _androidInterstitialTest : _iosInterstitialTest;
     if (Platform.isAndroid) return _androidInterstitialProd;
     return _iosInterstitialTest;
   }
 
-  // ---------------------------
-  // 로드 / 준비
-  // ---------------------------
+  // 앱 시작 시 1회 호출 권장
   void warmUp() {
     _loadInterstitialIfNeeded();
   }
 
-  void _loadInterstitialIfNeeded() {
-    if (_interstitial != null) return;
-    if (_loadingInterstitial) return;
-
-    _loadingInterstitial = true;
-
-    debugPrint('[ADS] load interstitial... useTest=$_useTestAds unit=$interstitialUnitId');
-
-    InterstitialAd.load(
-      adUnitId: interstitialUnitId,
-      request: const AdRequest(),
-      adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) {
-          _interstitial = ad;
-          _loadingInterstitial = false;
-          debugPrint('[ADS] interstitial LOADED ✅');
-
-          ad.fullScreenContentCallback = FullScreenContentCallback(
-            onAdShowedFullScreenContent: (ad) {
-              _lastShownAt = DateTime.now();
-              debugPrint('[ADS] interstitial SHOWED ✅');
-            },
-            onAdDismissedFullScreenContent: (ad) {
-              debugPrint('[ADS] interstitial DISMISSED');
-              ad.dispose();
-              _interstitial = null;
-              _loadInterstitialIfNeeded();
-            },
-            onAdFailedToShowFullScreenContent: (ad, error) {
-              debugPrint('[ADS] interstitial FAILED_TO_SHOW ❌ $error');
-              ad.dispose();
-              _interstitial = null;
-              _loadInterstitialIfNeeded();
-            },
-          );
-        },
-        onAdFailedToLoad: (error) {
-          _interstitial = null;
-          _loadingInterstitial = false;
-          debugPrint('[ADS] interstitial FAILED_TO_LOAD ❌ $error (unit=$interstitialUnitId)');
-        },
-      ),
-    );
-  }
-
-  // ---------------------------
-  // ✅ “종목 상세 열기” 카운트 증가
-  // ---------------------------
   void onOpenResult() {
     _openResultCount++;
-    _loadInterstitialIfNeeded();
+    _loadInterstitialIfNeeded(); // 항상 예열
   }
 
   bool _isEligibleNow() {
@@ -130,18 +78,23 @@ class AdService {
     return diff >= cooldownSeconds;
   }
 
+  // ✅ 핵심: show 요청 시점에 없으면 pending 처리
   Future<void> maybeShowInterstitial() async {
     if (!_isEligibleNow()) return;
 
     final ad = _interstitial;
-
     if (ad == null) {
-      debugPrint('[ADS] not ready yet → skip show');
-      _loadInterstitialIfNeeded();
+      debugPrint('[ADS] interstitial not ready → pendingShow');
+      _pendingShow = true;
+      _loadInterstitialIfNeeded(); // 즉시 로드 시도
       return;
     }
 
-    _interstitial = null;
+    await _showInterstitial(ad);
+  }
+
+  Future<void> _showInterstitial(InterstitialAd ad) async {
+    _interstitial = null; // 한 번 show하면 재사용 불가
 
     final completer = Completer<void>();
 
@@ -166,5 +119,58 @@ class AdService {
 
     ad.show();
     await completer.future;
+  }
+
+  void _loadInterstitialIfNeeded() {
+    if (_interstitial != null) return;
+    if (_loadingInterstitial) return;
+
+    _retryTimer?.cancel();
+    _loadingInterstitial = true;
+
+    debugPrint('[ADS] load interstitial... useTest=$_useTestAds unit=$interstitialUnitId');
+
+    InterstitialAd.load(
+      adUnitId: interstitialUnitId,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) async {
+          _loadingInterstitial = false;
+          _retryAttempt = 0;
+          _interstitial = ad;
+
+          debugPrint('[ADS] interstitial LOADED ✅');
+
+          // ✅ pendingShow면, 로드되자마자 보여주기(단, 쿨다운 조건은 이미 통과했다고 가정)
+          if (_pendingShow && _isEligibleNow()) {
+            _pendingShow = false;
+            final toShow = _interstitial;
+            if (toShow != null) {
+              await _showInterstitial(toShow);
+            }
+          }
+        },
+        onAdFailedToLoad: (error) {
+          _interstitial = null;
+          _loadingInterstitial = false;
+
+          debugPrint('[ADS] interstitial FAILED_TO_LOAD ❌ $error (unit=$interstitialUnitId)');
+
+          // ✅ 지수 백오프 재시도 (최대 60초)
+          _retryAttempt = (_retryAttempt + 1).clamp(1, 10);
+          final delaySec = (2 << (_retryAttempt - 1)).clamp(2, 60);
+          _retryTimer?.cancel();
+          _retryTimer = Timer(Duration(seconds: delaySec), _loadInterstitialIfNeeded);
+
+          debugPrint('[ADS] retry in ${delaySec}s (attempt=$_retryAttempt)');
+        },
+      ),
+    );
+  }
+
+  void dispose() {
+    _retryTimer?.cancel();
+    _interstitial?.dispose();
+    _interstitial = null;
   }
 }

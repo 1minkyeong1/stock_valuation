@@ -17,7 +17,10 @@ import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/utils/finance_rules.dart';
 import 'package:stock_valuation_app/utils/number_format.dart';
 
+import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
@@ -344,7 +347,7 @@ class _ResultPageState extends State<ResultPage> {
       const SnackBar(content: Text("값을 다시 불러왔습니다.")),
     );
   }
-
+  /*
   Future<void> _openNaverFinanceForCurrent() async {
     debugPrint('[NAVER] market=${widget.market} code=${widget.item.code}');
 
@@ -386,6 +389,113 @@ class _ResultPageState extends State<ResultPage> {
     } catch (_) {
       return false;
     }
+  }
+  */
+
+  Future<void> _openNaverFinanceForCurrent() async {
+    debugPrint('[NAVER] market=${widget.market} code=${widget.item.code}');
+
+    final raw = widget.item.code.trim();
+    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+
+    // ✅ 1) 국내: 숫자 6자리면 종목 페이지를 "외부(새창)"로
+    if (digits.length == 6) {
+      final url = 'https://finance.naver.com/item/main.naver?code=$digits';
+      final ok = await _openInExternalBrowser(url);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('네이버증권(국내) 페이지를 열 수 없습니다.')),
+        );
+      }
+      return;
+    }
+
+    // ✅ 2) 해외: 티커 기반으로 후보 URL들을 순서대로 시도 (전부 "외부 새창")
+    final sym = _normalizeWorldTicker(raw);
+
+    final candidates = <String>[
+      // 사용자가 관측한 패턴: .O, .K 등이 핵심 (IONQ.K, CPNG.K, AAPL.O 등)
+      'https://m.stock.naver.com/worldstock/stock/$sym.O/total',
+      'https://m.stock.naver.com/worldstock/stock/$sym.O/discussion',
+
+      'https://m.stock.naver.com/worldstock/stock/$sym.K/total',
+      'https://m.stock.naver.com/worldstock/stock/$sym.K/discussion',
+
+      'https://m.stock.naver.com/worldstock/stock/$sym.N/total',
+      'https://m.stock.naver.com/worldstock/stock/$sym.N/discussion',
+
+      // 일부는 suffix 없이도 될 때가 있음
+      'https://m.stock.naver.com/worldstock/stock/$sym/total',
+      'https://m.stock.naver.com/worldstock/stock/$sym/discussion',
+
+      // 최종 fallback: USA 해외주식 홈(랭킹/토론)
+      'https://m.stock.naver.com/worldstock/home/USA/discussion/ranking',
+    ];
+
+    // 안내문(원치 않으면 제거 가능)
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('해외는 네이버 해외주식에서 티커로 검색해서 확인하세요.')),
+      );
+    }
+
+    for (final url in candidates) {
+      final ok = await _openInExternalBrowser(url);
+      if (ok) return;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('네이버 해외주식 페이지를 열 수 없습니다.')),
+      );
+    }
+  }
+
+  /// ✅ 외부 "브라우저"로 강제 오픈 (네이버 앱 가로채기 감소)
+  /// - Android: Chrome → Samsung Internet → 일반 external
+  /// - iOS: 일반 external
+  Future<bool> _openInExternalBrowser(String url) async {
+    final uri = Uri.parse(url);
+
+    if (Platform.isAndroid) {
+      // 1) Chrome 우선
+      final okChrome = await _tryAndroidBrowser(url, package: 'com.android.chrome');
+      if (okChrome) return true;
+
+      // 2) Samsung Internet (갤럭시 기본 브라우저)
+      final okSamsung = await _tryAndroidBrowser(url, package: 'com.sec.android.app.sbrowser');
+      if (okSamsung) return true;
+
+      // 3) 그 외 기본 처리
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+
+    return await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<bool> _tryAndroidBrowser(String url, {required String package}) async {
+    try {
+      final intent = AndroidIntent(
+        action: 'action_view',
+        data: url,
+        package: package,
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      );
+      await intent.launch();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 해외 티커 최소 보정
+  /// - '.' 제거가 성공률 좋음
+  /// - BRK.A / BRK.B는 네이버에서 BRKa/BRKb 형태가 종종 보임
+  String _normalizeWorldTicker(String ticker) {
+    final t = ticker.toUpperCase().trim();
+    if (t == 'BRK.A') return 'BRKa';
+    if (t == 'BRK.B') return 'BRKb';
+    return t.replaceAll('.', '');
   }
 
   // ---------- Rating UI ----------

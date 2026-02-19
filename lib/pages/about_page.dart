@@ -3,7 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'terms_text.dart';
-import 'privacy_text.dart';
+//import 'privacy_text.dart';
 
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
@@ -186,11 +186,11 @@ class _AboutPageState extends State<AboutPage> {
             title: const Text('이용약관'),
             onTap: () => _showTextDialog('이용약관', TermsText.content),
           ),
-          ListTile(
-            leading: const Icon(Icons.privacy_tip_outlined),
-            title: const Text('개인정보처리방침'),
-            onTap: () => _showTextDialog('개인정보처리방침', PrivacyText.content),
-          ),
+          // ListTile(
+          //   leading: const Icon(Icons.privacy_tip_outlined),
+          //   title: const Text('개인정보처리방침'),
+          //   onTap: () => _showTextDialog('개인정보처리방침', PrivacyText.content),
+          // ),
           ListTile(
             leading: const Icon(Icons.code),
             title: const Text('오픈소스 라이선스'),

@@ -208,22 +208,6 @@ class _SearchPageState extends State<SearchPage> {
         }
       }
 
-      // ✅ KR 탭에서 미국 티커 형태는 차단(자동 전환 X)
-      if (_tab == Market.kr &&
-          _looksLikeUsTicker(mapped) &&
-          !SearchAlias.looksLikeKrCode(mapped)) {
-        if (!mounted) return;
-        if (seq != _searchSeq) return;
-
-        setState(() {
-          _loading = false;
-          _results = [];
-          _error = "국내 탭에서는 미국 티커 검색을 지원하지 않습니다. ‘미국’ 탭에서 검색해 주세요.";
-        });
-        FocusScope.of(context).requestFocus(_searchFocus);
-        return;
-      }
-
       // ✅ 검색은 딱 1번만
       final r = await widget.hub.search(_tab, mapped);
 
@@ -532,6 +516,26 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
   }
+
+  void _showUsNaverHelp() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('미국 종목 네이버 비교 안내'),
+        content: const Text(
+          '미국 종목은 네이버에서 티커 표기(.O / .N / .K 등) 규칙이 달라 '
+          '앱에서 종목 상세로 “직접 연결”이 안 될 수 있어요.\n\n'
+          '비교가 필요하면 네이버 해외주식에서 티커(AAPL, TSLA 등)로 검색해 주세요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
   
   Widget _sectionHeader({
     required String title,
@@ -728,7 +732,7 @@ class _SearchPageState extends State<SearchPage> {
         ],
       ),
     );
-  }
+  }  
 
   // ✅ 검색 결과/히스토리 영역은 아래 Expanded에서만 바뀌게(검색창은 고정!)
   @override
@@ -744,6 +748,12 @@ class _SearchPageState extends State<SearchPage> {
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
         ),
         actions: [
+          if (_tab == Market.us)
+            IconButton(
+              tooltip: '네이버 비교 안내',
+              icon: const Icon(Icons.help_outline),
+              onPressed: _showUsNaverHelp,
+            ),
           IconButton(
             tooltip: '앱 정보',
             style: const ButtonStyle(
@@ -775,6 +785,22 @@ class _SearchPageState extends State<SearchPage> {
                 _searchBox(),
                 const SizedBox(height: 10),
 
+                 if (_tab == Market.us) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          "네이버 비교는 티커로 검색이 필요할 수 있어요. (우측 ? 참고)",
+                          style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                ],
                 if (_loading) const LinearProgressIndicator(),
                 if (_error != null)
                   Padding(
@@ -865,11 +891,22 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _resultList() {
+    final q = _controller.text.trim();
+    final mapped = _mapQueryByTab(_tab, q);
+
+    final looksTicker = _looksLikeUsTicker(mapped) && !SearchAlias.looksLikeKrCode(mapped);
+
+    final emptyDesc = (_tab == Market.kr)
+        ? (looksTicker
+            ? "국내에서 결과가 없으면 ‘미국’ 탭에서 티커로도 검색해보세요."
+            : "종목명/코드를 다시 확인해보세요.")
+        : "티커를 다시 확인해보세요.";
+
     return (_results.isEmpty && !_loading)
         ? _emptyHintCard(
             icon: Icons.search_off,
             title: "검색 결과가 없어요",
-            desc: (_tab == Market.kr) ? "종목명/코드를 다시 확인해보세요." : "티커를 다시 확인해보세요.",
+            desc: emptyDesc,
           )
         : ListView.separated(
             itemCount: _results.length,

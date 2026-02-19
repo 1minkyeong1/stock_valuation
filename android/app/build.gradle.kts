@@ -39,6 +39,16 @@ android {
     }
 }
 
+dependencies {
+    // AdMob SDK (필수)
+    implementation("com.google.android.gms:play-services-ads:25.0.0")
+
+    // Mediation adapters
+    implementation("com.google.ads.mediation:applovin:13.5.1.0")
+    implementation("com.unity3d.ads:unity-ads:4.16.5")
+    implementation("com.google.ads.mediation:unity:4.16.6.0")
+}
+
 flutter {
     source = "../.."
 }
