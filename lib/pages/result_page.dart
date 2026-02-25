@@ -22,6 +22,7 @@ import 'package:stock_valuation_app/widgets/inputs/labeled_number_field.dart';
 import 'package:stock_valuation_app/widgets/inputs/metric_field_with_badge.dart';
 import 'package:stock_valuation_app/services/external_link_service.dart';
 import 'package:stock_valuation_app/utils/money_input_formatter.dart';
+import 'package:stock_valuation_app/pages/financial_statement_page.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
@@ -77,7 +78,7 @@ class _ResultPageState extends State<ResultPage> {
   StockFundamentals _initF = const StockFundamentals(eps: 0, bps: 0, dps: 0);
   double _initR = 9.0;
 
-  // 고급보기 토글용
+  // 고급보기 토글용 (true=고급/작은카드, false=초급/큰카드)
   bool _showAdvanced = true;
 
   String get _storeKey => "${widget.market.name}:${widget.item.code}";
@@ -143,6 +144,15 @@ class _ResultPageState extends State<ResultPage> {
     }
     if (!mounted) return;
     setState(() => _isFav = !_isFav);
+  }
+
+  // -----------------
+  // View Toggle (눈 아이콘 / rating 카드 탭 / 미싱카드 탭 공통)
+  // -----------------
+  void _toggleViewMode() {
+    if (!mounted) return;
+    setState(() => _showAdvanced = !_showAdvanced);
+    debugPrint('[Toggle] showAdvanced=$_showAdvanced');
   }
 
   // ---------- 파싱 ----------
@@ -448,12 +458,12 @@ class _ResultPageState extends State<ResultPage> {
               _isFav ? Icons.star : Icons.star_border,
               color: _isFav ? Colors.amber : null,
             ),
-            onPressed: _toggleFavorite,
+            onPressed: _toggleFavorite, // ✅ 즐겨찾기
           ),
           IconButton(
             tooltip: _showAdvanced ? "고급보기 숨기기" : "고급보기 보기",
             icon: Icon(_showAdvanced ? Icons.visibility : Icons.visibility_off),
-            onPressed: () => setState(() => _showAdvanced = !_showAdvanced),
+            onPressed: _toggleViewMode, // ✅ 눈 아이콘 = 토글
           ),
           Align(
             alignment: Alignment.centerLeft,
@@ -534,16 +544,27 @@ class _ResultPageState extends State<ResultPage> {
       children: [
         _headerCard(name, code),
         const SizedBox(height: 8),
+
+        // ✅ rating 카드 탭도 눈 아이콘과 동일 동작
         if (rating != null) ...[
-          _showAdvanced ? _ratingCardCompact(rating) : _ratingCardLarge(rating),
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _toggleViewMode,
+            child: _showAdvanced ? _ratingCardCompact(rating) : _ratingCardLarge(rating),
+          ),
           const SizedBox(height: 8),
         ],
+
+        // ✅ 미싱일 때만 카드 존재 + 탭=눈아이콘
         _missingDataHintCard(),
         const SizedBox(height: 8),
+
         _inputCard(),
         const SizedBox(height: 8),
+
         _resultCard(currentPrice: price, result: result, calcError: calcError),
         const SizedBox(height: 8),
+
         _sellGuideCard(result: result, calcError: calcError),
         const SizedBox(height: 8),
       ],
@@ -595,6 +616,21 @@ class _ResultPageState extends State<ResultPage> {
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _openFinancialStatementPage,
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text("재무제표 보기"),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      minimumSize: const Size(0, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -603,6 +639,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // ✅ 미싱일 때만 나오고, 탭하면 토글(눈 아이콘과 동일)
   Widget _missingDataHintCard() {
     final eps = _parseDouble(_epsCtrl);
     final bps = _parseDouble(_bpsCtrl);
@@ -618,52 +655,74 @@ class _ResultPageState extends State<ResultPage> {
     final fellBack = (_usedFinanceYear != null) && (_usedFinanceYear != _targetFinanceYear);
     final dpsZero = (dps == 0);
 
+    // ✅ 고급(true)=간단, 초급(false)=자세히
+    final showDetail = !_showAdvanced;
+
+    final brief = "EPS/BPS 자동값이 비어 있습니다. (탭하면 보기 전환)";
+    final detail = (widget.market == Market.kr)
+        ? "현재 앱은 이번 계산에 $usedYear년 재무를 사용했습니다.\n"
+            "$usedYear년 재무가 미공개/승인대기/갱신 전인 종목은 EPS/BPS가 0으로 표시될 수 있어요.\n"
+            "${fellBack ? "※ $_targetFinanceYear 값이 부족해 $usedYear로 자동 전환했습니다.\n" : ""}"
+            "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
+            "값을 직접 입력하면 즉시 재계산됩니다."
+        : "해당 값은 공시/배당 반영 타이밍 또는 API 제공 범위에 따라 비어 있을 수 있어요.\n"
+            "${dpsZero ? "※ DPS=0은 무배당(정상) 또는 데이터 미제공일 수 있어요.\n" : ""}"
+            "값을 직접 입력하면 즉시 재계산됩니다.";
+
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Colors.orange.withAlpha(30),
-              child: const Icon(Icons.info_outline, color: Colors.orange),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "데이터 미제공/계산불가: ${missing.join(', ')}",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    (widget.market == Market.kr)
-                        ? "현재 앱은 이번 계산에 $usedYear년 재무를 사용했습니다.\n"
-                            "$usedYear년 재무가 미공개/승인대기/갱신 전인 종목은 EPS/BPS가 0으로 표시될 수 있어요.\n"
-                            "${fellBack ? "※ $_targetFinanceYear 값이 부족해 $usedYear로 자동 전환했습니다.\n" : ""}"
-                            "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
-                            "값을 직접 입력하면 즉시 재계산됩니다."
-                        : "해당 값은 공시/배당 반영 타이밍 또는 API 제공 범위에 따라 비어 있을 수 있어요.\n"
-                            "${dpsZero ? "※ DPS=0은 무배당(정상) 또는 데이터 미제공일 수 있어요.\n" : ""}"
-                            "값을 직접 입력하면 즉시 재계산됩니다.",
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: _retryAutoValues,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text("값 자동 재시도(새로고침)"),
-                    ),
-                  ),
-                ],
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _toggleViewMode,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.orange.withAlpha(30),
+                child: const Icon(Icons.info_outline, color: Colors.orange),
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            "데이터 미제공/계산불가: ${missing.join(', ')}",
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        Icon(
+                          showDetail ? Icons.expand_less : Icons.expand_more,
+                          color: Colors.grey,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      showDetail ? detail : brief,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    if (showDetail) ...[
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: _retryAutoValues,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text("값 자동 재시도(새로고침)"),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -705,7 +764,6 @@ class _ResultPageState extends State<ResultPage> {
                 ],
               ),
             ),
-
             const SizedBox(height: 10),
 
             if (_parseDouble(_priceCtrl) == 0.0)
@@ -1217,18 +1275,21 @@ class _ResultPageState extends State<ResultPage> {
     Color c;
 
     if (over) {
-      title = "보유/매도 점검(참고) · 과열 구간 가능";
-      subtitle = "현재/적정이 ${gap.toStringAsFixed(0)}% 입니다. 안전마진이 줄었는지 체크해보세요.";
+      title = "보유/매도 점검(참고) · 과열 주의";
+      subtitle =
+          "현재가가 적정가 대비 ${gap.toStringAsFixed(0)}% 높습니다. 내재가치보다 비싼 구간이니, 수익을 확정할지 아니면 기업의 초과 성장을 더 믿고 기다릴지 결정이 필요한 시점입니다.";
       icon = Icons.warning_amber;
       c = Colors.orange;
     } else if (under) {
-      title = "보유/매도 점검(참고) · 가격보다 사업";
-      subtitle = "현재/적정이 ${gap.toStringAsFixed(0)}% 입니다. 매도보다 ‘사업 가정’부터 점검해요.";
+      title = "보유/매도 점검(참고) · 안전마진 유효";
+      subtitle =
+          "현재가가 적정가 대비 ${gap.toStringAsFixed(0)}% 낮아 안전마진이 충분합니다. 시세 흔들림에 불안해하기보다, 기업의 이익 성장세와 사업의 본질이 변하지 않았는지 확인하며 보유하세요.";
       icon = Icons.fact_check;
       c = Colors.blueGrey;
     } else {
-      title = "보유/매도 점검(참고)";
-      subtitle = "가격 변동보다 ‘해자/경영/펀더멘털’ 변화를 먼저 확인해보세요.";
+      title = "보유/매도 점검(참고) · 가치 부합";
+      subtitle =
+          "현재 주가가 기업의 내재가치에 근접했습니다. 이제부터는 가격의 싸고 비쌈을 따지기보다, 기업의 '해자(경쟁력)'나 '경영진의 태도' 등 질적인 변화를 더 세밀하게 관찰해야 합니다.";
       icon = Icons.checklist;
       c = Colors.indigo;
     }
@@ -1293,6 +1354,21 @@ class _ResultPageState extends State<ResultPage> {
           onClose: () => Navigator.pop(ctx),
         );
       },
+    );
+  }
+
+  // 재무제표 페이지 이동
+  void _openFinancialStatementPage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FinancialStatementPage(
+          hub: widget.hub,
+          market: widget.market,
+          item: widget.item,
+          initialFundamentals: _fundamentals,
+        ),
+      ),
     );
   }
 }

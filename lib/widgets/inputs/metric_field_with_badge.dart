@@ -30,10 +30,10 @@ class MetricFieldWithBadge extends StatelessWidget {
     final isBps = up == "BPS";
     final isDps = up == "DPS";
 
-    // ✅ EPS/BPS만 음수 허용
+    // EPS/BPS만 음수 허용
     final allowNegative = isEps || isBps;
 
-    // ✅ 배지 규칙
+    // 배지 규칙
     final showLoss = isEps && !isEditingMinusOnly && FinanceRules.isLossEps(val);
     final showMissing = !isDps && !isEditingMinusOnly && FinanceRules.isMissing(val);
     final showDpsZero = isDps && (val == 0);
