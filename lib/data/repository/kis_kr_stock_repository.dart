@@ -6,16 +6,7 @@ import 'stock_repository.dart';
 import '../api/dart_proxy_client.dart';
 import '../../utils/search_alias.dart';
 
-/// KIS(실시간 가격) + OpenDART(재무/배당)를 "Worker"를 통해 호출하는 Repository
-///
-/// ✅ 핵심 수정 포인트
-/// - 기존: /dart/fundamentals (Worker에 없음 → 404)
-/// - 변경: Worker에 실제 존재하는 라우트만 사용
-///   1) /dart/corp      : stock code -> corp_code
-///   2) /dart/fnltt     : fnlttSinglAcntAll (재무제표)
-///   3) /dart/alot      : alotMatter (배당)
-///
-/// 그리고 앱에서 EPS/BPS/DPS를 직접 조합합니다.
+/// KIS(실시간 가격) + OpenDART(재무/배당)를 Worker를 통해 호출하는 Repository
 class KisKrStockRepository implements StockRepository {
   final String workerBaseUrl;
   final http.Client _client;
@@ -54,11 +45,10 @@ class KisKrStockRepository implements StockRepository {
     final uri = Uri.parse('$base$p').replace(queryParameters: params);
 
     _log('[WORKER GET] ${tag ?? p} -> $uri');
+
     return _client.get(uri).timeout(
-      const Duration(seconds: 12),
-      onTimeout: () {
-        throw Exception('WORKER timeout(12s): ${tag ?? p}');
-      },
+      const Duration(seconds: 18),
+      onTimeout: () => throw Exception('WORKER timeout(18s): ${tag ?? p}'),
     );
   }
 
@@ -73,7 +63,7 @@ class KisKrStockRepository implements StockRepository {
   }
 
   // -------------------------
-  // 안전 파서: 문자열(원/%, 콤마, 괄호음수 등) -> double
+  // 안전 파서: 문자열 -> double
   // -------------------------
   double _toDouble(dynamic v) {
     if (v == null) return 0.0;
@@ -99,6 +89,21 @@ class KisKrStockRepository implements StockRepository {
     return double.tryParse(s) ?? 0.0;
   }
 
+  // DART 숫자(원단위) 파서: num
+  num _toNum(dynamic v) {
+    final s0 = (v ?? '').toString().trim();
+    if (s0.isEmpty || s0 == '-') return 0;
+    var s = s0.replaceAll(',', '').trim();
+
+    // (123) => -123
+    if (s.startsWith('(') && s.endsWith(')')) {
+      s = '-${s.substring(1, s.length - 1)}';
+    }
+
+    s = s.replaceAll(RegExp(r'[^0-9\-]'), '');
+    return num.tryParse(s) ?? 0;
+  }
+
   // =========================
   // 1) 검색 (Worker: /kr/search)
   // =========================
@@ -107,14 +112,14 @@ class KisKrStockRepository implements StockRepository {
     final raw = query.trim();
     if (raw.isEmpty) return [];
 
-    // ✅ 한글(네이버/삼성전자 등) → 6자리 코드로 먼저 치환해서 Worker로 보냄
+    // 한글 alias -> 코드로 치환 시도
     final hit = SearchAlias.resolveKr(raw);
     final q2 = hit?.code ?? raw;
 
     final res = await _workerGet(
       '/kr/search',
       {
-        'q': q2,        // Worker는 query/q 둘 다 받게 만들어둠
+        'q': q2, // Worker가 q/query 둘 다 받도록 해두셨다면 OK
         'limit': '30',
       },
       tag: 'kr/search',
@@ -132,19 +137,17 @@ class KisKrStockRepository implements StockRepository {
         .whereType<Map>()
         .map((m) {
           final mm = Map<String, dynamic>.from(m);
-
           final code = (mm['symbol'] ?? mm['code'] ?? '').toString().trim();
           final name = (mm['nameKo'] ?? mm['name'] ?? '').toString().trim();
           final market = (mm['exchangeShortName'] ?? mm['market'] ?? 'KRX')
               .toString()
               .trim();
-
           return StockSearchItem(code: code, name: name, market: market);
         })
         .where((x) => x.code.isNotEmpty && x.name.isNotEmpty)
         .toList();
 
-    // ✅ Worker 결과가 비어도 alias는 잡힌 경우 1개라도 보여주기
+    // Worker 결과가 비어도 alias가 있으면 1개라도 보여주기
     if (items.isEmpty && hit != null) {
       return [StockSearchItem(code: hit.code, name: hit.name, market: 'KRX')];
     }
@@ -192,7 +195,6 @@ class KisKrStockRepository implements StockRepository {
     );
   }
 
-  // 있으면 편하니 유지
   @override
   Future<double> getPrice(String code) async => (await getPriceQuote(code)).price;
 
@@ -200,96 +202,100 @@ class KisKrStockRepository implements StockRepository {
   // 3) 재무 (Worker: /dart/corp + /dart/fnltt + /dart/alot)
   // =========================
   @override
-  Future<StockFundamentals> getFundamentals(String code, {int? targetYear}) async {
+  Future<StockFundamentals> getFundamentals(String code,
+      {int? targetYear}) async {
     final c = _normalizeCode(code);
     if (c.isEmpty) throw Exception('code is empty');
 
-    // ✅ DartProxyClient는 Worker의 /dart/* 라우트를 호출
     final dart = DartProxyClient(
       workerBaseUrl: workerBaseUrl,
-      client: _client, // 같은 http client 재사용
+      client: _client,
       debugLog: debugLog,
     );
 
-    // 1) corp_code 확보
+    // 1) corp_code
     final corpCode = await dart.getCorpCodeByStockCode(c);
     if (corpCode == null || corpCode.isEmpty) {
       throw Exception('corp_code를 찾지 못했습니다: stock=$c');
     }
     _logDart('corp_code: stock=$c -> corp=$corpCode');
 
-    // 2) EPS/BPS 계산을 위해 주식수(shares) 확보
+    // 2) shares (EPS/BPS 계산용)
     int shares = 0;
     try {
       final pq = await getPriceQuote(c);
       shares = pq.listedShares;
 
-      // listedShares가 0인데 시총/가격은 있으면 역산
       if (shares <= 0 && pq.marketCap > 0 && pq.price > 0) {
         shares = (pq.marketCap / pq.price).round();
       }
 
-      _logDart('shares: listedShares=${pq.listedShares} marketCap=${pq.marketCap} price=${pq.price} -> shares=$shares');
+      _logDart(
+          'shares: listedShares=${pq.listedShares} marketCap=${pq.marketCap} price=${pq.price} -> shares=$shares');
     } catch (e) {
       _logDart('getPriceQuote for shares failed: $e');
     }
 
-    // 3) 어떤 연도/보고서로 조회할지 결정
-    // - targetYear를 줬는데 DART에 없을 수 있으니, targetYear 포함해서 뒤로 2년까지 fallback
+    // 3) 후보 연도/보고서
     final now = DateTime.now();
-
-    // ✅ targetYear 없으면 "직전연도(FY)"부터 시작
     final baseYear = targetYear ?? (now.year - 1);
-
-    // ✅ 최근 3개년 탐색
     final years = <int>[baseYear, baseYear - 1, baseYear - 2];
 
-    // ✅ 3Q 우선, 없으면 FY fallback
+    // 3Q 우선 → 연간(FY) 폴백
     const reprtOrder = <String>['11014', '11011'];
 
+    // 결과값
     double eps = 0.0;
     double bps = 0.0;
     double dps = 0.0;
 
+    // 메타
     int? usedYear;
     String? usedReprt;
+    String? usedFsDiv; // "CFS" / "OFS"
     String? basDt;
     String? periodLabel;
 
-    // 4) fnltt 가져오기 (CFS 우선, 없으면 OFS)
+    // 원본 재무 금액(신뢰 표시용)
+    num revenue = 0;
+    num opIncome = 0;
+    num netIncome = 0;
+    num equity = 0;
+
+    // 4) fnltt rows (CFS 우선, 없으면 OFS)
     List<Map<String, dynamic>>? fnlttRows;
 
     for (final y in years) {
       for (final reprt in reprtOrder) {
+        // CFS
         debugPrint('fnltt call corp=$corpCode year=$y reprt=$reprt fs=CFS');
-
         final cfs = await dart.fnlttSinglAcntAll(
           corpCode: corpCode,
           year: y,
           reprtCode: reprt,
           fsDiv: 'CFS',
         );
-
         if (cfs.isNotEmpty) {
           fnlttRows = cfs;
           usedYear = y;
           usedReprt = reprt;
+          usedFsDiv = 'CFS';
           break;
         }
 
+        // OFS
         debugPrint('fnltt call corp=$corpCode year=$y reprt=$reprt fs=OFS');
-
         final ofs = await dart.fnlttSinglAcntAll(
           corpCode: corpCode,
           year: y,
           reprtCode: reprt,
           fsDiv: 'OFS',
         );
-
         if (ofs.isNotEmpty) {
           fnlttRows = ofs;
           usedYear = y;
           usedReprt = reprt;
+          usedFsDiv = 'OFS';
           break;
         }
       }
@@ -297,55 +303,69 @@ class KisKrStockRepository implements StockRepository {
     }
 
     if (fnlttRows != null && fnlttRows.isNotEmpty) {
-      final profit = _pickNetProfitFromDart(fnlttRows);
-      final equity = _pickEquityFromDart(fnlttRows);
+      // ✅ 원본 금액 추출
+      netIncome = _pickNetIncomeFromDart(fnlttRows);
+      equity = _pickEquityFromDart(fnlttRows);
+      revenue = _pickRevenueFromDart(fnlttRows);
+      opIncome = _pickOpIncomeFromDart(fnlttRows);
 
-      final annualizedProfit = _annualizeProfit(profit, usedReprt ?? '11011');
+      // ✅ EPS/BPS 계산
+      final annualizedNetIncome =
+          _annualizeProfit(netIncome.toDouble(), usedReprt ?? '11011');
 
       if (shares > 0) {
-        eps = (annualizedProfit != 0) ? (annualizedProfit / shares) : 0.0;
-        bps = (equity != 0) ? (equity / shares) : 0.0;
+        eps = (annualizedNetIncome != 0) ? (annualizedNetIncome / shares) : 0.0;
+        bps = (equity != 0) ? (equity.toDouble() / shares) : 0.0;
       } else {
         _logDart('shares=0 so eps/bps cannot be calculated');
       }
 
-      // ✅ metrics-lite 규칙: 실제로 선택된 usedYear/usedReprt로 basDt/label 계산
+      // 메타(기준일/라벨)
       if (usedYear != null && usedReprt != null) {
         final info = _reprtInfo(usedYear, usedReprt);
-        basDt = info.basDt;        // 11014 => YYYY0930
-        periodLabel = info.label;  // "YYYY 3Q"
-      } else {
-        basDt = null;
-        periodLabel = null;
+        basDt = info.basDt;
+        periodLabel = info.label;
       }
 
       _logDart(
-        'fnltt picked: year=$usedYear reprt=$usedReprt profit=$profit '
-        '(annual=$annualizedProfit) equity=$equity shares=$shares -> eps=$eps bps=$bps '
-        'basDt=$basDt label=$periodLabel'
+        'fnltt picked: year=$usedYear reprt=$usedReprt fs=$usedFsDiv '
+        'revenue=$revenue opIncome=$opIncome netIncome=$netIncome equity=$equity shares=$shares '
+        '-> eps=$eps bps=$bps basDt=$basDt label=$periodLabel',
       );
     } else {
       _logDart('fnlttRows empty for corp=$corpCode stock=$c (years=$years)');
     }
 
-    // 6) DPS(배당) 가져오기
-    // - usedYear/usedReprt가 있으면 그 조합부터
-    // - 없으면 FY(11011)로 먼저 시도
-    final tryYear = usedYear ?? (targetYear ?? (now.year - 1));
+    // 5) DPS (배당)
+    final tryYear = usedYear ?? baseYear;
     final tryReprt = usedReprt ?? '11011';
 
-    dps = await _tryFetchDps(dart: dart, corpCode: corpCode, year: tryYear, reprtCode: tryReprt);
+    dps = await _tryFetchDps(
+      dart: dart,
+      corpCode: corpCode,
+      year: tryYear,
+      reprtCode: tryReprt,
+    );
 
-    // DPS가 0이면 보고서코드만 바꿔서 몇 번 더 시도(많이 현실적인 fallback)
+    // DPS가 0이면 보고서코드만 바꿔서 추가 시도
     if (dps == 0.0) {
       for (final rc in reprtOrder) {
         if (rc == tryReprt) continue;
-        dps = await _tryFetchDps(dart: dart, corpCode: corpCode, year: tryYear, reprtCode: rc);
+        dps = await _tryFetchDps(
+          dart: dart,
+          corpCode: corpCode,
+          year: tryYear,
+          reprtCode: rc,
+        );
         if (dps != 0.0) break;
       }
     }
 
-    _logDart('final fundamentals: eps=$eps bps=$bps dps=$dps year=$usedYear basDt=$basDt label=$periodLabel');
+    _logDart(
+      'final fundamentals: eps=$eps bps=$bps dps=$dps '
+      'year=$usedYear reprt=$usedReprt fs=$usedFsDiv basDt=$basDt label=$periodLabel '
+      'revenue=$revenue opIncome=$opIncome netIncome=$netIncome equity=$equity shares=$shares',
+    );
 
     return StockFundamentals(
       eps: eps,
@@ -354,14 +374,24 @@ class KisKrStockRepository implements StockRepository {
       year: usedYear ?? targetYear ?? baseYear,
       basDt: basDt,
       periodLabel: periodLabel,
+
+      // ✅ 재무제표 원본 금액(사용자 신뢰용 표시)
+      revenue: (revenue > 0) ? revenue : null,
+      opIncome: (opIncome != 0) ? opIncome : null, // 적자(음수) 유지
+      netIncome: (netIncome != 0) ? netIncome : null, // 적자(음수) 유지
+      equity: (equity != 0) ? equity : null,
+
+      // ✅ 어떤 조합으로 가져왔는지
+      fsDiv: usedFsDiv,
+      reprtCode: usedReprt,
+      fsSource: 'OpenDART fnlttSinglAcntAll',
     );
   }
 
   // =========================
-  // DART 파싱 유틸들
+  // DART 파싱/보조
   // =========================
 
-  // 보고서 정보(표시용)
   _ReprtInfo _reprtInfo(int year, String reprtCode) {
     switch (reprtCode) {
       case '11013':
@@ -376,7 +406,6 @@ class KisKrStockRepository implements StockRepository {
     }
   }
 
-  // 분기/반기/3Q 연환산
   double _annualizeProfit(double profit, String reprtCode) {
     switch (reprtCode) {
       case '11013': // 1Q
@@ -391,15 +420,14 @@ class KisKrStockRepository implements StockRepository {
     }
   }
 
-  // 당기순이익(손익계산서) 우선순위로 추출
-  double _pickNetProfitFromDart(List<Map<String, dynamic>> rows) {
-    // 손익계산서(IS/CIS)만 추리기
+  // ===== 당기순이익(원본 금액) =====
+  num _pickNetIncomeFromDart(List<Map<String, dynamic>> rows) {
     final isRows = rows.where((m) {
       final sj = (m['sj_div'] ?? '').toString();
       return sj == 'IS' || sj == 'CIS';
     }).toList();
 
-    if (isRows.isEmpty) return 0.0;
+    if (isRows.isEmpty) return 0;
 
     // account_id 우선
     const idPriority = <String>[
@@ -414,67 +442,98 @@ class KisKrStockRepository implements StockRepository {
             orElse: () => <String, dynamic>{},
           );
       if (hit.isNotEmpty) {
-        final v = _toDouble(hit['thstrm_amount'] ?? hit['thstrm_add_amount']);
-        if (v != 0.0) return v;
+        final v = _toNum(hit['thstrm_add_amount']);
+        if (v != 0) return v;
+        final v2 = _toNum(hit['thstrm_amount']);
+        if (v2 != 0) return v2;
       }
     }
 
-    // account_nm(한글명) 포함 검색
+    // account_nm 포함 검색
     const namePriority = <String>[
       '지배기업소유주지분당기순이익',
-      '지배기업',
-      '귀속',
       '당기순이익',
       '당기순이익(손실)',
-      '분기순이익',
     ];
 
     for (final key in namePriority) {
       final hit = isRows.cast<Map<String, dynamic>>().firstWhere(
-            (x) => (x['account_nm'] ?? '').toString().replaceAll(' ', '').contains(key),
+            (x) => (x['account_nm'] ?? '')
+                .toString()
+                .replaceAll(' ', '')
+                .contains(key),
             orElse: () => <String, dynamic>{},
           );
       if (hit.isNotEmpty) {
-        final v = _toDouble(hit['thstrm_amount'] ?? hit['thstrm_add_amount']);
-        if (v != 0.0) return v;
+        final v = _toNum(hit['thstrm_add_amount']);
+        if (v != 0) return v;
+        final v2 = _toNum(hit['thstrm_amount']);
+        if (v2 != 0) return v2;
       }
     }
 
-    return 0.0;
+    return 0;
   }
 
-  // 자본총계(재무상태표) 추출
-  double _pickEquityFromDart(List<Map<String, dynamic>> rows) {
-    // 정확히 "자본총계" 우선
+  // ===== 자본총계 =====
+  num _pickEquityFromDart(List<Map<String, dynamic>> rows) {
     final exact = rows.firstWhere(
       (m) => (m['account_nm'] ?? '').toString() == '자본총계',
       orElse: () => <String, dynamic>{},
     );
     if (exact.isNotEmpty) {
-      return _toDouble(exact['thstrm_amount'] ?? exact['thstrm_add_amount']);
+      final v = _toNum(exact['thstrm_amount']);
+      if (v != 0) return v;
+      return _toNum(exact['thstrm_add_amount']);
     }
 
-    // 포함 검색
-    final contains1 = rows.firstWhere(
-      (m) => (m['account_nm'] ?? '').toString().contains('자본총계'),
-      orElse: () => <String, dynamic>{},
-    );
-    if (contains1.isNotEmpty) {
-      return _toDouble(contains1['thstrm_amount'] ?? contains1['thstrm_add_amount']);
+    for (final key in const ['자본총계', '총자본']) {
+      final hit = rows.firstWhere(
+        (m) => (m['account_nm'] ?? '').toString().contains(key),
+        orElse: () => <String, dynamic>{},
+      );
+      if (hit.isNotEmpty) {
+        final v = _toNum(hit['thstrm_amount']);
+        if (v != 0) return v;
+        return _toNum(hit['thstrm_add_amount']);
+      }
     }
-
-    final contains2 = rows.firstWhere(
-      (m) => (m['account_nm'] ?? '').toString().contains('총자본'),
-      orElse: () => <String, dynamic>{},
-    );
-    if (contains2.isNotEmpty) {
-      return _toDouble(contains2['thstrm_amount'] ?? contains2['thstrm_add_amount']);
-    }
-
-    return 0.0;
+    return 0;
   }
 
-  // DPS 시도(배당 테이블에서 "주당/현금/배당/보통주" 우선)
+  // ===== 매출액 =====
+  num _pickRevenueFromDart(List<Map<String, dynamic>> rows) {
+    for (final r in rows) {
+      final nm = (r['account_nm'] ?? '').toString().trim(); 
+      if (nm.contains('매출액') || nm.contains('영업수익')) {
+        final add = _toNum(r['thstrm_add_amount']);
+        final amt = _toNum(r['thstrm_amount']);
+        final prevAdd = _toNum(r['frmtrm_add_amount']);
+        final prevAmt = _toNum(r['frmtrm_amount']);
+        return (add != 0) ? add : (amt != 0) ? amt : (prevAdd != 0) ? prevAdd : prevAmt;
+      }
+    }
+    return 0;
+  }
+
+  // ===== 영업이익 =====
+  num _pickOpIncomeFromDart(List<Map<String, dynamic>> rows) {
+    for (final r in rows) {
+      final nm = (r['account_nm'] ?? '').toString().trim(); 
+      if (nm.contains('영업이익')) {
+        final add = _toNum(r['thstrm_add_amount']);
+        final amt = _toNum(r['thstrm_amount']);
+        final prevAdd = _toNum(r['frmtrm_add_amount']);
+        final prevAmt = _toNum(r['frmtrm_amount']);
+        return (add != 0) ? add : (amt != 0) ? amt : (prevAdd != 0) ? prevAdd : prevAmt;
+      }
+    }
+    return 0;
+  }
+
+  // =========================
+  // DPS 시도 (배당)
+  // =========================
   Future<double> _tryFetchDps({
     required DartProxyClient dart,
     required String corpCode,
@@ -499,7 +558,8 @@ class KisKrStockRepository implements StockRepository {
       final v = _toDouble(picked['thstrm']);
       if (v == 0.0) return 0.0;
 
-      _logDart('alot picked year=$year reprt=$reprtCode se=${picked['se']} stock=${picked['stock_knd']} -> dps=$v');
+      _logDart(
+          'alot picked year=$year reprt=$reprtCode se=${picked['se']} stock=${picked['stock_knd']} -> dps=$v');
       return v;
     } catch (e) {
       _logDart('alot fail year=$year reprt=$reprtCode: $e');
@@ -518,7 +578,6 @@ class KisKrStockRepository implements StockRepository {
 
       int score = 0;
 
-      // 1) "주당/현금/배당" 계정 우선
       final hasJooDang = se.contains('주당');
       final hasCash = se.contains('현금');
       final hasDividend = se.contains('배당');
@@ -534,14 +593,10 @@ class KisKrStockRepository implements StockRepository {
         score += 300;
       }
 
-      // 2) 보통주 우선
       if (stock.contains('보통주')) score += 250;
       if (stock.contains('우선주')) score -= 100;
 
-      // 3) 값이 있으면 가산
       if (v != 0.0) score += 400;
-
-      // 4) (원) 표기 가산
       if (se.contains('(원)')) score += 50;
 
       if (score > bestScore) {
@@ -549,7 +604,6 @@ class KisKrStockRepository implements StockRepository {
         best = m;
       }
     }
-
     return best;
   }
 }

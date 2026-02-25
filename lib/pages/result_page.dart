@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -14,13 +15,13 @@ import 'package:stock_valuation_app/models/valuation_rating.dart';
 import 'package:stock_valuation_app/services/valuation_service.dart';
 
 import 'package:stock_valuation_app/widgets/ad_banner.dart';
-import 'package:stock_valuation_app/utils/finance_rules.dart';
 import 'package:stock_valuation_app/utils/number_format.dart';
 
-import 'dart:io';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:android_intent_plus/android_intent.dart';
-import 'package:android_intent_plus/flag.dart';
+import 'package:stock_valuation_app/widgets/sell_guide_sheet.dart';
+import 'package:stock_valuation_app/widgets/inputs/labeled_number_field.dart';
+import 'package:stock_valuation_app/widgets/inputs/metric_field_with_badge.dart';
+import 'package:stock_valuation_app/services/external_link_service.dart';
+import 'package:stock_valuation_app/utils/money_input_formatter.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
@@ -39,7 +40,7 @@ class ResultPage extends StatefulWidget {
 }
 
 class _ResultPageState extends State<ResultPage> {
-  // 재무는 2025년만 사용(없으면 2024 fallback)
+  // 재무는 2025년만 사용(없으면 2024 fallback) - 안내 메시지에서 사용
   static const int _targetFinanceYear = 2025;
 
   StockFundamentals? _fundamentals;
@@ -59,6 +60,9 @@ class _ResultPageState extends State<ResultPage> {
   final _inputStore = StockInputStore();
   Timer? _saveDebounce;
 
+  // 외부 링크 서비스
+  final _link = const ExternalLinkService();
+
   // 컨트롤러
   late final TextEditingController _priceCtrl;
   late final TextEditingController _epsCtrl;
@@ -70,7 +74,6 @@ class _ResultPageState extends State<ResultPage> {
 
   // 초기값(Reset)
   double _initPrice = 0.0;
-
   StockFundamentals _initF = const StockFundamentals(eps: 0, bps: 0, dps: 0);
   double _initR = 9.0;
 
@@ -78,9 +81,25 @@ class _ResultPageState extends State<ResultPage> {
   bool _showAdvanced = true;
 
   String get _storeKey => "${widget.market.name}:${widget.item.code}";
+  bool get _isUS => widget.market == Market.us;
 
+  // 표시용(라벨)
+  String get _priceUnitText => _isUS ? r'현재가($)' : '현재가(원)';
+
+  // ✅ 결과/요약 표시용 포맷 (콤마/단위 일관성)
+  String _fmtMoney(num v) => _isUS ? fmtUsd(v) : fmtWon(v);
+
+  // 가격 포맷터
   late final TextInputFormatter _priceFormatterKr;
   late final TextInputFormatter _priceFormatterUs;
+
+  // 로딩 단계 표시(디버깅/UX)
+  String _stage = '';
+  void _setStage(String s) {
+    if (!mounted) return;
+    setState(() => _stage = s);
+    debugPrint('[ResultPage][STAGE] $s');
+  }
 
   @override
   void initState() {
@@ -94,10 +113,10 @@ class _ResultPageState extends State<ResultPage> {
     // ✅ 가격 포맷터 준비
     _priceFormatterKr = MoneyInputFormatter(allowDecimal: false);
     _priceFormatterUs = MoneyInputFormatter(allowDecimal: true, decimalDigits: 2);
-    // 디버깅    
+
     debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.market}');
-        _loadFavState();
-        _load();
+    _loadFavState();
+    _load();
   }
 
   @override
@@ -110,31 +129,89 @@ class _ResultPageState extends State<ResultPage> {
     super.dispose();
   }
 
-  Widget _metricHint(String? s) {
-    if (s == null || s.trim().isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Text(
-        s,
-        style: const TextStyle(fontSize: 11, color: Colors.grey),
-      ),
-    );
-  }
-
-
   Future<void> _loadFavState() async {
     final v = await _favStore.isFavorite(widget.market, widget.item.code);
     if (!mounted) return;
     setState(() => _isFav = v);
   }
 
-  String _stage = '';
-    void _setStage(String s) {
-      if (!mounted) return;
-      setState(() => _stage = s);
-      debugPrint('[ResultPage][STAGE] $s');
+  Future<void> _toggleFavorite() async {
+    if (_isFav) {
+      await _favStore.remove(widget.market, widget.item.code);
+    } else {
+      await _favStore.add(widget.market, widget.item);
     }
+    if (!mounted) return;
+    setState(() => _isFav = !_isFav);
+  }
 
+  // ---------- 파싱 ----------
+  double _parseDouble(TextEditingController c) {
+    final t = c.text.trim().replaceAll(',', '');
+    if (t == '-' || t.isEmpty) return 0.0;
+    return double.tryParse(t) ?? 0.0;
+  }
+
+  void _applyToTextFields({required double price, required StockFundamentals f}) {
+    final fd = _isUS ? 2 : 0;
+
+    _priceCtrl.text = _isUS
+        ? fmtUsdDecimal(price, fractionDigits: 2).replaceAll('\$', '')
+        : fmtWonDecimal(price, fractionDigits: 0);
+
+    _epsCtrl.text = _isUS
+        ? fmtUsdDecimal(f.eps, fractionDigits: fd).replaceAll('\$', '')
+        : fmtWonDecimal(f.eps, fractionDigits: fd);
+
+    _bpsCtrl.text = _isUS
+        ? fmtUsdDecimal(f.bps, fractionDigits: fd).replaceAll('\$', '')
+        : fmtWonDecimal(f.bps, fractionDigits: fd);
+
+    _dpsCtrl.text = _isUS
+        ? fmtUsdDecimal(f.dps, fractionDigits: fd).replaceAll('\$', '')
+        : fmtWonDecimal(f.dps, fractionDigits: fd);
+  }
+
+  // ---------- 저장 ----------
+  void _scheduleSaveInputs() {
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 400), () async {
+      final inputs = StockInputs(
+        eps: _parseDouble(_epsCtrl),
+        bps: _parseDouble(_bpsCtrl),
+        dps: _parseDouble(_dpsCtrl),
+        rPct: rPct,
+      );
+      await _inputStore.save(_storeKey, inputs);
+    });
+  }
+
+  void _onAnyInputChanged() {
+    setState(() {}); // 즉시 재계산 UI 반영
+    _scheduleSaveInputs();
+  }
+
+  Future<void> _resetToInitial() async {
+    await _inputStore.remove(_storeKey);
+    if (!mounted) return;
+    setState(() {
+      rPct = _initR;
+      _applyToTextFields(price: _initPrice, f: _initF);
+    });
+  }
+
+  Future<void> _retryAutoValues() async {
+    await _inputStore.remove(_storeKey);
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("값을 다시 불러왔습니다.")),
+    );
+  }
+
+  // ---------- Load ----------
   Future<void> _load() async {
     if (!mounted) return;
 
@@ -153,11 +230,8 @@ class _ResultPageState extends State<ResultPage> {
     int? nextUsedFinanceYear;
 
     try {
-      // =========================
-      // 1) 가격 + 기준일(KR만)
-      // =========================
+      // 1) 가격
       _setStage('가격 조회 시작');
-
       Future<void> loadPrice() async {
         try {
           final quote = await widget.hub
@@ -166,8 +240,8 @@ class _ResultPageState extends State<ResultPage> {
             throw Exception('가격 조회 타임아웃(8s)');
           });
 
-          price = quote.price;          // ✅ PriceQuote.price가 double이면 그대로
-          nextPriceBasDt = quote.basDt; // ✅ KR이면 날짜, US면 null 가능
+          price = quote.price;
+          nextPriceBasDt = quote.basDt;
         } catch (e, st) {
           debugPrint('[ResultPage] price fail: $e\n$st');
           price = 0.0;
@@ -175,11 +249,8 @@ class _ResultPageState extends State<ResultPage> {
         }
       }
 
-      // =========================
-      // 2) EPS/BPS/DPS
-      // =========================
+      // 2) 재무
       _setStage('재무(EPS/BPS/DPS) 조회 시작');
-
       Future<void> loadFunda() async {
         try {
           f = await widget.hub
@@ -196,14 +267,11 @@ class _ResultPageState extends State<ResultPage> {
         }
       }
 
-      // ✅ 핵심: 두 개를 직렬로 하지 말고 병렬로
+      // 병렬
       await Future.wait([loadPrice(), loadFunda()]);
 
-      // =========================
-      // 3) 초기값 저장 + 텍스트필드 반영
-      // =========================
+      // 3) 초기값 반영
       _setStage('초기값 반영');
-
       _initPrice = price;
       _initF = f;
       _initR = 9.0;
@@ -211,38 +279,31 @@ class _ResultPageState extends State<ResultPage> {
 
       _applyToTextFields(price: price, f: f);
 
-      // =========================
-      // 4) 저장값 복원(있으면 덮어쓰기)
-      // =========================
+      // 4) 저장값 복원
       _setStage('저장값 복원');
+      final saved = await _inputStore.load(_storeKey).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
 
-      final saved = await _inputStore
-          .load(_storeKey)
-          .timeout(const Duration(seconds: 3), onTimeout: () {
-        // 저장소가 느리면 UI를 막지 않도록
-        return null;
-      });
-
-      final isUS = widget.market == Market.us;
-      final fd = isUS ? 2 : 0;
+      final fd = _isUS ? 2 : 0;
 
       if (saved != null) {
-        // ✅ 저장값이 "의미 있는 값"일 때만 덮어쓰기
         if (saved.eps != 0) {
-         _epsCtrl.text = isUS
-             ? fmtUsdDecimal(saved.eps, fractionDigits: fd).replaceAll('\$', '')
-             : fmtWonDecimal(saved.eps, fractionDigits: fd);
+          _epsCtrl.text = _isUS
+              ? fmtUsdDecimal(saved.eps, fractionDigits: fd).replaceAll('\$', '')
+              : fmtWonDecimal(saved.eps, fractionDigits: fd);
         }
 
         if (saved.bps != 0) {
-          _bpsCtrl.text = isUS
+          _bpsCtrl.text = _isUS
               ? fmtUsdDecimal(saved.bps, fractionDigits: fd).replaceAll('\$', '')
               : fmtWonDecimal(saved.bps, fractionDigits: fd);
         }
 
-        // DPS는 0이 무배당일 수 있으니 기존 정책 유지(0이면 덮어쓰기 안 함)
+        // DPS=0은 무배당일 수 있어 기존정책 유지 (0이면 덮어쓰기 안 함)
         if (saved.dps != 0) {
-          _dpsCtrl.text = isUS
+          _dpsCtrl.text = _isUS
               ? fmtUsdDecimal(saved.dps, fractionDigits: fd).replaceAll('\$', '')
               : fmtWonDecimal(saved.dps, fractionDigits: fd);
         }
@@ -270,232 +331,60 @@ class _ResultPageState extends State<ResultPage> {
     }
   }
 
-  void _applyToTextFields({required double price, required StockFundamentals f}) {
-    final isUS = widget.market == Market.us;
-    final fd = isUS ? 2 : 0;
-
-    _priceCtrl.text = isUS
-        ? fmtUsdDecimal(price, fractionDigits: 2).replaceAll('\$', '')
-        : fmtWonDecimal(price, fractionDigits: 0);
-
-    _epsCtrl.text = isUS
-        ? fmtUsdDecimal(f.eps, fractionDigits: fd).replaceAll('\$', '')
-        : fmtWonDecimal(f.eps, fractionDigits: fd);
-
-    _bpsCtrl.text = isUS
-        ? fmtUsdDecimal(f.bps, fractionDigits: fd).replaceAll('\$', '')
-        : fmtWonDecimal(f.bps, fractionDigits: fd);
-
-    _dpsCtrl.text = isUS
-        ? fmtUsdDecimal(f.dps, fractionDigits: fd).replaceAll('\$', '')
-        : fmtWonDecimal(f.dps, fractionDigits: fd);
-  }
-
-  // ---------- 파싱 ----------
-  double _parseDouble(TextEditingController c) {
-    final t = c.text.trim().replaceAll(',', '');
-    if (t == '-' || t.isEmpty) return 0.0;
-    return double.tryParse(t) ?? 0.0;
-  }
-
-  // ---------- 저장 ----------
-  void _scheduleSaveInputs() {
-    _saveDebounce?.cancel();
-    _saveDebounce = Timer(const Duration(milliseconds: 400), () async {
-      final inputs = StockInputs(
-        eps: _parseDouble(_epsCtrl),
-        bps: _parseDouble(_bpsCtrl),
-        dps: _parseDouble(_dpsCtrl),
-        rPct: rPct,
-      );
-      await _inputStore.save(_storeKey, inputs);
-    });
-  }
-
-  void _onAnyInputChanged() {
-    setState(() {});
-    _scheduleSaveInputs();
-  }
-
-  Future<void> _resetToInitial() async {
-    await _inputStore.remove(_storeKey);
-
-    if (!mounted) return;
-    setState(() {
-      rPct = _initR;
-      _applyToTextFields(price: _initPrice, f: _initF);
-    });
-  }
-
-  Future<void> _toggleFavorite() async {
-    if (_isFav) {
-      await _favStore.remove(widget.market, widget.item.code);
-    } else {
-      await _favStore.add(widget.market, widget.item);
-    }
-    if (!mounted) return;
-    setState(() => _isFav = !_isFav);
-  }
-
-  Future<void> _retryAutoValues() async {
-    await _inputStore.remove(_storeKey);
-    if (!mounted) return;
-    await _load();
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("값을 다시 불러왔습니다.")),
-    );
-  }
-  /*
+  // ---------- Naver ----------
   Future<void> _openNaverFinanceForCurrent() async {
-    debugPrint('[NAVER] market=${widget.market} code=${widget.item.code}');
+    final ok = await _link.openNaverFinance(rawCodeOrTicker: widget.item.code);
 
-    final raw = widget.item.code.trim();
-    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
-
-    // ✅ 국내: 숫자 6자리면 종목 페이지를 "외부(새창)"로
-    if (digits.length == 6) {
-      final url = 'https://finance.naver.com/item/main.naver?code=$digits';
-      final ok = await _openExternal(url);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('네이버증권(국내)을 열 수 없습니다.')),
-        );
-      }
-      return;
-    }
-
-    // ✅ 해외: 종목 매칭 안 함 → USA 해외주식 화면을 "외부(새창)"로
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('해외는 네이버 해외주식에서 티커로 검색해서 확인하세요.')),
-      );
-    }
-
-    const url = 'https://m.stock.naver.com/worldstock/home/USA/discussion/ranking';
-    final ok = await _openExternal(url);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('네이버 해외주식(USA) 화면을 열 수 없습니다.')),
+        const SnackBar(content: Text('네이버 페이지를 열 수 없습니다.')),
       );
-    }
-  }
-
-  Future<bool> _openExternal(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      return await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      return false;
-    }
-  }
-  */
-
-  Future<void> _openNaverFinanceForCurrent() async {
-    debugPrint('[NAVER] market=${widget.market} code=${widget.item.code}');
-
-    final raw = widget.item.code.trim();
-    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
-
-    // ✅ 1) 국내: 숫자 6자리면 종목 페이지를 "외부(새창)"로
-    if (digits.length == 6) {
-      final url = 'https://finance.naver.com/item/main.naver?code=$digits';
-      final ok = await _openInExternalBrowser(url);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('네이버증권(국내) 페이지를 열 수 없습니다.')),
-        );
-      }
       return;
     }
 
-    // ✅ 2) 해외: 티커 기반으로 후보 URL들을 순서대로 시도 (전부 "외부 새창")
-    final sym = _normalizeWorldTicker(raw);
-
-    final candidates = <String>[
-      // 사용자가 관측한 패턴: .O, .K 등이 핵심 (IONQ.K, CPNG.K, AAPL.O 등)
-      'https://m.stock.naver.com/worldstock/stock/$sym.O/total',
-      'https://m.stock.naver.com/worldstock/stock/$sym.O/discussion',
-
-      'https://m.stock.naver.com/worldstock/stock/$sym.K/total',
-      'https://m.stock.naver.com/worldstock/stock/$sym.K/discussion',
-
-      'https://m.stock.naver.com/worldstock/stock/$sym.N/total',
-      'https://m.stock.naver.com/worldstock/stock/$sym.N/discussion',
-
-      // 일부는 suffix 없이도 될 때가 있음
-      'https://m.stock.naver.com/worldstock/stock/$sym/total',
-      'https://m.stock.naver.com/worldstock/stock/$sym/discussion',
-
-      // 최종 fallback: USA 해외주식 홈(랭킹/토론)
-      'https://m.stock.naver.com/worldstock/home/USA/discussion/ranking',
-    ];
-
-    // 안내문(원치 않으면 제거 가능)
-    if (mounted) {
+    if (mounted && _isUS) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('해외는 네이버 해외주식에서 티커로 검색해서 확인하세요.')),
       );
     }
-
-    for (final url in candidates) {
-      final ok = await _openInExternalBrowser(url);
-      if (ok) return;
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('네이버 해외주식 페이지를 열 수 없습니다.')),
-      );
-    }
   }
 
-  /// ✅ 외부 "브라우저"로 강제 오픈 (네이버 앱 가로채기 감소)
-  /// - Android: Chrome → Samsung Internet → 일반 external
-  /// - iOS: 일반 external
-  Future<bool> _openInExternalBrowser(String url) async {
-    final uri = Uri.parse(url);
-
-    if (Platform.isAndroid) {
-      // 1) Chrome 우선
-      final okChrome = await _tryAndroidBrowser(url, package: 'com.android.chrome');
-      if (okChrome) return true;
-
-      // 2) Samsung Internet (갤럭시 기본 브라우저)
-      final okSamsung = await _tryAndroidBrowser(url, package: 'com.sec.android.app.sbrowser');
-      if (okSamsung) return true;
-
-      // 3) 그 외 기본 처리
-      return await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-
-    return await launchUrl(uri, mode: LaunchMode.externalApplication);
+  // ---------- Header / Meta ----------
+  String _fmtBasDt(String yyyymmdd) {
+    final s = yyyymmdd.trim();
+    if (s.length != 8) return s;
+    return "${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}";
   }
 
-  Future<bool> _tryAndroidBrowser(String url, {required String package}) async {
-    try {
-      final intent = AndroidIntent(
-        action: 'action_view',
-        data: url,
-        package: package,
-        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
-      );
-      await intent.launch();
-      return true;
-    } catch (_) {
-      return false;
+  String? _metricLabel() {
+    final f = _fundamentals ?? _initF;
+
+    final pl = f.periodLabel?.trim();
+    if (pl != null && pl.isNotEmpty && pl != 'TTM') {
+      return '재무 기준: $pl';
     }
+
+    final bd = f.basDt?.trim();
+    if (bd != null && bd.isNotEmpty) {
+      return '재무 기준일: ${_fmtBasDt(bd)}';
+    }
+
+    if (f.year != null) {
+      return '재무 기준: ${f.year}년';
+    }
+
+    return null;
   }
 
-  /// 해외 티커 최소 보정
-  /// - '.' 제거가 성공률 좋음
-  /// - BRK.A / BRK.B는 네이버에서 BRKa/BRKb 형태가 종종 보임
-  String _normalizeWorldTicker(String ticker) {
-    final t = ticker.toUpperCase().trim();
-    if (t == 'BRK.A') return 'BRKa';
-    if (t == 'BRK.B') return 'BRKb';
-    return t.replaceAll('.', '');
+  Widget _metricHint(String? s) {
+    if (s == null || s.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        s,
+        style: const TextStyle(fontSize: 11, color: Colors.grey),
+      ),
+    );
   }
 
   // ---------- Rating UI ----------
@@ -525,27 +414,26 @@ class _ResultPageState extends State<ResultPage> {
       case RatingLevel.caution:
         return Colors.orange;
       case RatingLevel.avoid:
-        return Colors.red;        
-    } 
+        return Colors.red;
+    }
   }
 
-  Color get _accent    => widget.market == Market.us ? Colors.blue : Colors.green;
-  Color get _cHeader   => widget.market == Market.us ? Colors.indigo : Colors.teal;
-  Color get _cInput    => widget.market == Market.us ? Colors.blue   : Colors.green;
-  Color get _cResult   => widget.market == Market.us ? Colors.purple : Colors.deepPurple;
-  Color get _cKpi      => widget.market == Market.us ? Colors.cyan   : Colors.lightBlue;
-  Color get _cInfo     => widget.market == Market.us ? Colors.orange : Colors.amber;
+  Color get _accent => _isUS ? Colors.blue : Colors.green;
+  Color get _cHeader => _isUS ? Colors.indigo : Colors.teal;
+  Color get _cInput => _isUS ? Colors.blue : Colors.green;
+  Color get _cResult => _isUS ? Colors.purple : Colors.deepPurple;
+  Color get _cKpi => _isUS ? Colors.cyan : Colors.lightBlue;
+  Color get _cInfo => _isUS ? Colors.orange : Colors.amber;
 
   BoxDecoration _cardDeco(Color c) => BoxDecoration(
-    color: c.withAlpha(16),
-    borderRadius: BorderRadius.circular(14),
-    border: Border.all(color: c.withAlpha(55)),
-  );
+        color: c.withAlpha(16),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: c.withAlpha(55)),
+      );
 
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    //디버깅
     debugPrint('[ResultPage] build loading=$_loading error=$_error');
     final name = widget.item.name;
 
@@ -558,7 +446,7 @@ class _ResultPageState extends State<ResultPage> {
           IconButton(
             icon: Icon(
               _isFav ? Icons.star : Icons.star_border,
-              color: _isFav ? Colors.amber : null, // ⭐ 
+              color: _isFav ? Colors.amber : null,
             ),
             onPressed: _toggleFavorite,
           ),
@@ -567,7 +455,6 @@ class _ResultPageState extends State<ResultPage> {
             icon: Icon(_showAdvanced ? Icons.visibility : Icons.visibility_off),
             onPressed: () => setState(() => _showAdvanced = !_showAdvanced),
           ),
-          // 네이버증권 바로가기
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
@@ -580,17 +467,17 @@ class _ResultPageState extends State<ResultPage> {
       ),
       bottomNavigationBar: const AdBanner(),
       body: _loading
-    ? Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 12),
-            Text(_stage.isEmpty ? '로딩 중...' : _stage),
-          ],
-        ),
-      )
-    : (_error != null ? _errorView() : _bodyView()),
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 12),
+                  Text(_stage.isEmpty ? '로딩 중...' : _stage),
+                ],
+              ),
+            )
+          : (_error != null ? _errorView() : _bodyView()),
     );
   }
 
@@ -612,7 +499,7 @@ class _ResultPageState extends State<ResultPage> {
     final name = widget.item.name;
     final code = widget.item.code;
 
-    // 입력값(텍스트필드 기반)
+    // 입력값
     final price = _parseDouble(_priceCtrl);
     final eps = _parseDouble(_epsCtrl);
     final bps = _parseDouble(_bpsCtrl);
@@ -647,19 +534,17 @@ class _ResultPageState extends State<ResultPage> {
       children: [
         _headerCard(name, code),
         const SizedBox(height: 8),
-
-         if (rating != null) ...[
+        if (rating != null) ...[
           _showAdvanced ? _ratingCardCompact(rating) : _ratingCardLarge(rating),
           const SizedBox(height: 8),
         ],
-
         _missingDataHintCard(),
         const SizedBox(height: 8),
-
         _inputCard(),
         const SizedBox(height: 8),
-
         _resultCard(currentPrice: price, result: result, calcError: calcError),
+        const SizedBox(height: 8),
+        _sellGuideCard(result: result, calcError: calcError),
         const SizedBox(height: 8),
       ],
     );
@@ -696,7 +581,6 @@ class _ResultPageState extends State<ResultPage> {
                   style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 const SizedBox(height: 6),
-
                 if (f.basDt != null) ...[
                   const SizedBox(height: 4),
                   Text(
@@ -704,7 +588,6 @@ class _ResultPageState extends State<ResultPage> {
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
-
                 if (_priceBasDt != null) ...[
                   const SizedBox(height: 4),
                   Text(
@@ -720,227 +603,14 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  String _fmtBasDt(String yyyymmdd) {
-    final s = yyyymmdd.trim();
-    if (s.length != 8) return s;
-    return "${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}";
-  }
-
-  String? _metricLabelFor(String metric) {
-    // 1) fundamentals 우선
-    final f = _fundamentals ?? _initF;
-
-    // periodLabel이 있으면 그게 최우선 (예: "2025 Q3", "2025 FY", "TTM")
-    final pl = f.periodLabel?.trim();
-    if (pl != null && pl.isNotEmpty && pl != 'TTM') {
-      return '기준: $pl';
-    }
-
-    // basDt가 있으면 날짜 기준 표시
-    final bd = f.basDt?.trim();
-    if (bd != null && bd.isNotEmpty) {
-      return '기준일: ${_fmtBasDt(bd)}';
-    }
-
-    // year만 있으면 연도 기준 표시
-    if (f.year != null) {
-      return '기준: ${f.year}년';
-    }
-
-    // 그래도 없으면 (디버그 로그처럼 meta null) 표시 생략
-    return null;
-  }
-
-  // --------------------------
-  // ✅ 자동값 없음 / 적자 뱃지
-  // - 0  : 자동값 없음
-  // - <0 : 적자(EPS만)
-  // --------------------------
- // 자동 값 없음 (0일 때만)
-  Widget _autoMissingBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.orange.withAlpha(25),
-        border: Border.all(color: Colors.orange.withAlpha(120)),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: const Text(
-        "자동값 없음",
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.orange),
-      ),
-    );
-  }
-
-  // EPS 적자 배지 (EPS < 0 일 때만)
-  Widget _lossBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.red.withAlpha(25),
-        border: Border.all(color: Colors.red.withAlpha(120)),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: const Text(
-        "적자(EPS<0)",
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.red),
-      ),
-    );
-  }
-
- // EPS/BPS/DPS 전용 “라벨+배지+텍스트필드” 위젯
-  Widget _numFieldWithAutoBadge({
-    required String label,
-    required TextEditingController controller,
-    required void Function(String) onChanged,
-  }) {
-    final rawText = controller.text.trim().replaceAll(',', '');
-    final isEditingMinusOnly = (rawText == '-');
-
-    // "-"만은 double 파싱이 안 되므로 0으로 처리
-    final val = (!isEditingMinusOnly)
-        ? (double.tryParse(rawText) ?? 0)
-        : 0.0;
-
-    final up = label.trim().toUpperCase();
-    final isEps = up == "EPS";
-    final isBps = up == "BPS";
-    final isDps = up == "DPS";
-
-    // ✅ EPS/BPS만 음수 허용
-    final allowNegative = isEps || isBps;
-
-    // ✅ 배지 규칙
-    final showLoss = isEps && !isEditingMinusOnly && FinanceRules.isLossEps(val); // EPS<0
-    final showMissing =
-        !isDps && !isEditingMinusOnly && FinanceRules.isMissing(val); // EPS/BPS만 0 => 자동값 없음
-    final showDpsZero = isDps && (val == 0); // DPS=0 => 무배당/데이터없음
-
-    // ✅ ± 토글: 키보드에 '-'가 없어도 음수 입력 가능
-    void toggleSign() {
-      final t = controller.text.trim();
-      if (t.isEmpty) {
-        controller.text = '-';
-      } else if (t == '-') {
-        controller.text = '';
-      } else if (t.startsWith('-')) {
-        controller.text = t.substring(1);
-      } else {
-        controller.text = '-$t';
-      }
-      controller.selection = TextSelection.collapsed(offset: controller.text.length);
-      onChanged(controller.text);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(width: 8),
-            if (showLoss)
-              _lossBadge()
-            else if (showMissing)
-              _autoMissingBadge()
-            else if (showDpsZero)
-              _dpsZeroBadge(),
-          ],
-        ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(
-            decimal: true,
-            signed: true, // 뜨는 키보드에선 '-'가 나오게
-          ),
-          inputFormatters: [
-            widget.market == Market.us
-                ? MoneyInputFormatter(
-                    allowDecimal: true,
-                    decimalDigits: 2,
-                    allowNegative: allowNegative,
-                  )
-                : MoneyInputFormatter(
-                    allowDecimal: false,
-                    allowNegative: allowNegative,
-                  ),
-          ],
-          decoration: InputDecoration(
-            hintText: "직접 입력 가능",
-            border: const OutlineInputBorder(),
-            // ✅ EPS/BPS만 ± 버튼 제공
-            suffixIcon: allowNegative
-                ? IconButton(
-                    tooltip: '부호 전환(±)',
-                    onPressed: toggleSign,
-                    icon: const Text(
-                      '±',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                  )
-                : null,
-          ),
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-
-  // ✅ 새 배지: DPS=0 전용(무배당/데이터없음)
-  Widget _dpsZeroBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.blue.withAlpha(25),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.blue.withAlpha(80)),
-      ),
-      child: const Text(
-        "무배당/데이터없음",
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.blue),
-      ),
-    );
-  }
-
-  Widget _numField({
-    required String label,
-    required TextEditingController controller,
-    required void Function(String) onChanged,
-    List<TextInputFormatter>? inputFormatters,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: inputFormatters,
-          decoration: InputDecoration(
-            hintText: "직접 입력 가능",
-            border: const OutlineInputBorder(),
-            filled: true,
-            fillColor: Colors.white.withAlpha(200),
-          ),
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-
   Widget _missingDataHintCard() {
     final eps = _parseDouble(_epsCtrl);
     final bps = _parseDouble(_bpsCtrl);
     final dps = _parseDouble(_dpsCtrl);
 
     final missing = <String>[];
-
-    // ✅ EPS: 0만 “자동값 없음”. 음수는 적자(데이터 존재)
     if (eps == 0) missing.add("EPS");
     if (bps == 0) missing.add("BPS");
-    //if (dps == 0) missing.add("DPS");
 
     if (missing.isEmpty) return const SizedBox.shrink();
 
@@ -969,24 +639,19 @@ class _ResultPageState extends State<ResultPage> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 6),
-
-                  // ✅ 핵심: 2025 재무만 조회한다는 점을 명확히 안내
                   Text(
-                     (widget.market == Market.kr)
+                    (widget.market == Market.kr)
                         ? "현재 앱은 이번 계산에 $usedYear년 재무를 사용했습니다.\n"
-                          "$usedYear년 재무가 미공개/승인대기/갱신 전인 종목은 EPS/BPS가 0으로 표시될 수 있어요.\n"
-                          "${fellBack ? "※ $_targetFinanceYear 값이 부족해 $usedYear로 자동 전환했습니다.\n" : ""}"
-                          "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
-                          "값을 직접 입력하면 즉시 재계산됩니다."
+                            "$usedYear년 재무가 미공개/승인대기/갱신 전인 종목은 EPS/BPS가 0으로 표시될 수 있어요.\n"
+                            "${fellBack ? "※ $_targetFinanceYear 값이 부족해 $usedYear로 자동 전환했습니다.\n" : ""}"
+                            "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
+                            "값을 직접 입력하면 즉시 재계산됩니다."
                         : "해당 값은 공시/배당 반영 타이밍 또는 API 제공 범위에 따라 비어 있을 수 있어요.\n"
-                          "${dpsZero ? "※ DPS=0은 무배당(정상) 또는 데이터 미제공일 수 있어요.\n" : ""}"
-                          "값을 직접 입력하면 즉시 재계산됩니다.",
+                            "${dpsZero ? "※ DPS=0은 무배당(정상) 또는 데이터 미제공일 수 있어요.\n" : ""}"
+                            "값을 직접 입력하면 즉시 재계산됩니다.",
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-
                   const SizedBox(height: 10),
-
-                  // ✅ 자동 재시도 버튼
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
@@ -1005,6 +670,8 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   Widget _inputCard() {
+    final priceFormatter = _isUS ? _priceFormatterUs : _priceFormatterKr;
+
     return Card(
       color: _cInput.withAlpha(14),
       elevation: 0,
@@ -1017,7 +684,7 @@ class _ResultPageState extends State<ResultPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ 헤더를 살짝 분리(배경 + 둥근 모서리)
+            // Header
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
@@ -1028,10 +695,7 @@ class _ResultPageState extends State<ResultPage> {
               child: Row(
                 children: [
                   const Expanded(
-                    child: Text(
-                      "입력값",
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    child: Text("입력값", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                   TextButton(
                     onPressed: _resetToInitial,
@@ -1061,38 +725,43 @@ class _ResultPageState extends State<ResultPage> {
 
             const SizedBox(height: 10),
 
-            _numField(
+            // Price
+            LabeledNumberField(
               label: _priceUnitText,
               controller: _priceCtrl,
               onChanged: (_) => _onAnyInputChanged(),
-              inputFormatters: [
-                widget.market == Market.us ? _priceFormatterUs : _priceFormatterKr,
-              ],
+              inputFormatters: [priceFormatter],
+              hintText: "직접 입력 가능",
             ),
+
             const SizedBox(height: 8),
 
-            _numFieldWithAutoBadge(
+            // EPS/BPS/DPS
+            MetricFieldWithBadge(
+              isUS: _isUS,
               label: "EPS",
               controller: _epsCtrl,
               onChanged: (_) => _onAnyInputChanged(),
             ),
-            _metricHint(_metricLabelFor('EPS')),
             const SizedBox(height: 8),
 
-            _numFieldWithAutoBadge(
+            MetricFieldWithBadge(
+              isUS: _isUS,
               label: "BPS",
               controller: _bpsCtrl,
               onChanged: (_) => _onAnyInputChanged(),
             ),
-            _metricHint(_metricLabelFor('BPS')),
             const SizedBox(height: 8),
 
-            _numFieldWithAutoBadge(
+            MetricFieldWithBadge(
+              isUS: _isUS,
               label: "DPS",
               controller: _dpsCtrl,
               onChanged: (_) => _onAnyInputChanged(),
             ),
-            _metricHint(_metricLabelFor('DPS')),
+
+            // ✅ 재무 기준 힌트는 1번만
+            _metricHint(_metricLabel()),
 
             const SizedBox(height: 14),
             const Text("요구수익률 r(%)", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1102,8 +771,7 @@ class _ResultPageState extends State<ResultPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text("r = ${rPct.toStringAsFixed(1)}%"),
-                const Text("(ROE/r로 적정 PBR 결정)",
-                    style: TextStyle(color: Colors.grey, fontSize: 12)),
+                const Text("(ROE/r로 적정 PBR 결정)", style: TextStyle(color: Colors.grey, fontSize: 12)),
               ],
             ),
 
@@ -1159,15 +827,9 @@ class _ResultPageState extends State<ResultPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    rating.title,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: a),
-                  ),
+                  Text(rating.title, style: TextStyle(fontWeight: FontWeight.bold, color: a)),
                   const SizedBox(height: 2),
-                  Text(
-                    rating.summary,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                  ),
+                  Text(rating.summary, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
                 ],
               ),
             ),
@@ -1207,10 +869,7 @@ class _ResultPageState extends State<ResultPage> {
                     child: Icon(_ratingIcon(rating.level), color: a),
                   ),
                   const SizedBox(width: 10),
-                  Text(
-                    rating.title,
-                    style: TextStyle(fontWeight: FontWeight.w800, color: a),
-                  ),
+                  Text(rating.title, style: TextStyle(fontWeight: FontWeight.w800, color: a)),
                 ],
               ),
               const SizedBox(height: 10),
@@ -1254,7 +913,7 @@ class _ResultPageState extends State<ResultPage> {
                   const Text("결과", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
 
-                  // ✅ 초보 모드(눈 아이콘 OFF 상태라고 보면 됨)
+                  // 초보 모드
                   if (!_showAdvanced) ...[
                     Row(
                       children: [
@@ -1291,12 +950,12 @@ class _ResultPageState extends State<ResultPage> {
                     ),
                   ],
 
-                  // ✅ 고급 모드(눈 아이콘 ON)
+                  // 고급 모드
                   if (_showAdvanced) ...[
                     _sectionCard("가치(Valuation)", [
                       _metricTile(
                         label: "적정주가",
-                       value: _fmtMoney(result.fairPrice),
+                        value: _fmtMoney(result.fairPrice),
                         helper: "BPS × (ROE / r)",
                         icon: Icons.price_check,
                       ),
@@ -1315,7 +974,6 @@ class _ResultPageState extends State<ResultPage> {
                       ),
                     ]),
                     const SizedBox(height: 8),
-
                     _sectionCard("수익성(Profitability)", [
                       _metricTile(
                         label: "ROE",
@@ -1331,7 +989,6 @@ class _ResultPageState extends State<ResultPage> {
                       ),
                     ]),
                     const SizedBox(height: 8),
-
                     _sectionCard("배당(Dividend)", [
                       _metricTile(
                         label: "배당수익률",
@@ -1341,7 +998,6 @@ class _ResultPageState extends State<ResultPage> {
                       ),
                     ]),
                     const SizedBox(height: 8),
-
                     _sectionCard("멀티플(Multiples)", [
                       _metricTile(label: "PER", value: result.per.toStringAsFixed(2), icon: Icons.calculate),
                       _metricTile(label: "PBR", value: result.pbr.toStringAsFixed(2), icon: Icons.assessment),
@@ -1353,22 +1009,6 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  // us 함수
-bool get _isUS => widget.market == Market.us;
-
-// 표시용(원하면 유지, UI 라벨에만 사용)
-String get _priceUnitText  => _isUS ? r'현재가($)' : '현재가(원)';
-
-// ✅ 결과/요약 표시용 포맷 (콤마/단위 일관성)
-String _fmtMoney(num v) {
-  if (_isUS) {
-    return fmtUsd(v); // number_format.dart
-  } else {
-    return fmtWon(v); // number_format.dart
-  }
-}
-
-  // 초보모드에서 사용
   Widget _kpiBox({
     required String title,
     required String value,
@@ -1404,18 +1044,16 @@ String _fmtMoney(num v) {
     );
   }
 
-  // (하단) 초보 막대그래프 표시
   Widget _priceFairGauge({required double price, required double fairPrice}) {
     if (price <= 0 || fairPrice <= 0) {
       return const SizedBox.shrink();
     }
 
-    final ratio = price / fairPrice; // 1.0 이면 적정가
+    final ratio = price / fairPrice;
     final pct = ratio * 100.0;
 
-    // 바 길이(최대 200%까지만 표시)
     final clamped = ratio.clamp(0.0, 2.0);
-    final fill = clamped / 2.0; // 0.0~1.0
+    final fill = clamped / 2.0;
 
     final isUndervalued = ratio <= 1.0;
 
@@ -1429,26 +1067,18 @@ String _fmtMoney(num v) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "현재가 / 적정주가: ${pct.toStringAsFixed(1)}%",
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
+          Text("현재가 / 적정주가: ${pct.toStringAsFixed(1)}%", style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-
-          // 게이지 바 (0% ~ 200%)
           LayoutBuilder(
             builder: (context, c) {
               final w = c.maxWidth;
               final fillW = w * fill;
-
-              // 100% 위치(적정가 위치)
               final fairX = w * 0.5;
 
               return SizedBox(
                 height: 14,
                 child: Stack(
                   children: [
-                    // 배경
                     Container(
                       width: w,
                       height: 14,
@@ -1457,8 +1087,6 @@ String _fmtMoney(num v) {
                         borderRadius: BorderRadius.circular(999),
                       ),
                     ),
-
-                    // 채움(현재가 위치)
                     Container(
                       width: fillW,
                       height: 14,
@@ -1467,8 +1095,6 @@ String _fmtMoney(num v) {
                         borderRadius: BorderRadius.circular(999),
                       ),
                     ),
-
-                    // 100% 마커(적정가)
                     Positioned(
                       left: fairX - 1,
                       top: 0,
@@ -1480,7 +1106,6 @@ String _fmtMoney(num v) {
               );
             },
           ),
-
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1491,8 +1116,6 @@ String _fmtMoney(num v) {
             ],
           ),
           const SizedBox(height: 6),
-
-          // 숫자 안내
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1505,7 +1128,6 @@ String _fmtMoney(num v) {
     );
   }
 
-  // (하단) 고급용 설명 UI
   Widget _sectionCard(String title, List<Widget> children) {
     return Card(
       elevation: 0,
@@ -1575,98 +1197,102 @@ String _fmtMoney(num v) {
       ),
     );
   }
-}
 
-class MoneyInputFormatter extends TextInputFormatter {
-  final bool allowDecimal;
-  final int decimalDigits;
-  final bool allowNegative;
+  // ==========================
+  // Sell Guide
+  // ==========================
+  Widget _sellGuideCard({
+    required ValuationResult? result,
+    required String? calcError,
+  }) {
+    if (calcError != null || result == null) return const SizedBox.shrink();
 
-  MoneyInputFormatter({
-    required this.allowDecimal,
-    this.decimalDigits = 2,
-    this.allowNegative = false,
-  });
+    final gap = result.gapPct;
+    final over = gap >= 130;
+    final under = gap <= 90;
 
-  static String _withComma(String s) {
-    // s는 정수 문자열(부호 없음)만 들어오는 형태로 처리
-    return s.replaceAllMapped(
-      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-      (m) => '${m[1]},',
+    String title;
+    String subtitle;
+    IconData icon;
+    Color c;
+
+    if (over) {
+      title = "보유/매도 점검(참고) · 과열 구간 가능";
+      subtitle = "현재/적정이 ${gap.toStringAsFixed(0)}% 입니다. 안전마진이 줄었는지 체크해보세요.";
+      icon = Icons.warning_amber;
+      c = Colors.orange;
+    } else if (under) {
+      title = "보유/매도 점검(참고) · 가격보다 사업";
+      subtitle = "현재/적정이 ${gap.toStringAsFixed(0)}% 입니다. 매도보다 ‘사업 가정’부터 점검해요.";
+      icon = Icons.fact_check;
+      c = Colors.blueGrey;
+    } else {
+      title = "보유/매도 점검(참고)";
+      subtitle = "가격 변동보다 ‘해자/경영/펀더멘털’ 변화를 먼저 확인해보세요.";
+      icon = Icons.checklist;
+      c = Colors.indigo;
+    }
+
+    return Card(
+      elevation: 0,
+      color: c.withAlpha(12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: c.withAlpha(60)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _openSellGuideSheet(gapPct: gap),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor: c.withAlpha(24),
+                child: Icon(icon, color: c),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: c)),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openSellGuideSheet(gapPct: gap),
+                        icon: const Icon(Icons.open_in_new),
+                        label: const Text("체크리스트 보기"),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-    final raw = newValue.text;
-
-    // 비어있으면 그대로
-    if (raw.isEmpty) return newValue;
-
-    // 콤마 제거
-    var t = raw.replaceAll(',', '');
-
-    // ✅ 음수 처리 (맨 앞 '-' 1개만 허용)
-    bool neg = false;
-    if (allowNegative) {
-      if (t.startsWith('-')) neg = true;
-      t = t.replaceAll('-', '');
-    }
-
-    // 숫자/소수점 외 제거
-    if (allowDecimal) {
-      t = t.replaceAll(RegExp(r'[^0-9.]'), '');
-      // 점이 여러개면 첫 점만 남기기
-      final firstDot = t.indexOf('.');
-      if (firstDot != -1) {
-        final before = t.substring(0, firstDot + 1);
-        final after = t.substring(firstDot + 1).replaceAll('.', '');
-        t = before + after;
-      }
-      // 소수 자릿수 제한
-      if (firstDot != -1) {
-        final parts = t.split('.');
-        final intPart = parts[0];
-        final decPart = (parts.length > 1) ? parts[1] : '';
-        final trimmedDec = decPart.length > decimalDigits ? decPart.substring(0, decimalDigits) : decPart;
-        t = '$intPart.$trimmedDec';
-      }
-    } else {
-      t = t.replaceAll(RegExp(r'[^0-9]'), '');
-    }
-
-    // ✅ "-"만 입력 중인 상태 허용
-    if (allowNegative && neg && t.isEmpty) {
-      return const TextEditingValue(
-        text: '-',
-        selection: TextSelection.collapsed(offset: 1),
-      );
-    }
-
-    if (t.isEmpty) return const TextEditingValue(text: '');
-
-    // 정수/소수 분리 후 정수부 콤마
-    String formatted;
-    if (allowDecimal && t.contains('.')) {
-      final parts = t.split('.');
-      final intPart = parts[0].isEmpty ? '0' : parts[0];
-      final decPart = parts.length > 1 ? parts[1] : '';
-      formatted = '${_withComma(intPart)}.$decPart';
-    } else {
-      formatted = _withComma(t);
-    }
-
-     if (allowNegative && neg) {
-      formatted = '-$formatted';
-    }
-
-    // 커서 위치: 끝으로 보내는 단순 방식(가장 안정적)
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
+  void _openSellGuideSheet({required double gapPct}) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return SellGuideSheet(
+          gapPct: gapPct,
+          onClose: () => Navigator.pop(ctx),
+        );
+      },
     );
   }
-  
 }
-
-

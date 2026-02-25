@@ -95,7 +95,7 @@ class _AboutPageState extends State<AboutPage> {
 
     // ✅ 앱 정보
     const companyName = 'KMIN';
-    const companyDesc = '주식 적정가 계산 및 재무정보를 쉽게 확인할 수 있는 앱입니다.';
+    const companyDesc = '투기적인 매매가 아닌 원칙 있는 투자, 불확실한 미래 예측보다 확실한 재무 수치에 집중하는 보수적 투자자를 위한 앱입니다.';
     const supportEmail = 'k17mnk@gmail.com';
 
     // ✅ 스토어 링크 (패키지명 실제 값으로 바꾸세요)

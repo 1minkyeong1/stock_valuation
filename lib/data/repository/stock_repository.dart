@@ -26,29 +26,52 @@ class StockFundamentals {
   /// ✅ 표시용 라벨 - 예: "2025 3Q", "2024 FY"
   final String? periodLabel;
 
-   // ✅  지표별 기준 라벨/기준일/출처
-  final String? epsLabel;   // 예: "TTM (as of 2025-09-30)" 또는 "2025 3Q"
-  final String? bpsLabel;   // 예: "BS 2025-09-30"
-  final String? dpsLabel;   // 예: "Dividends (last 8) up to 2025-12-15"
+  // ✅ 지표별 기준 라벨/기준일/출처
+  final String? epsLabel;
+  final String? bpsLabel;
+  final String? dpsLabel;
 
-  final String? epsSource;  // 예: "key-metrics-ttm" / "income-statement(sum4Q)"
-  final String? bpsSource;  // 예: "key-metrics-ttm" / "balance-sheet(equity/shares)"
-  final String? dpsSource;  // 예: "key-metrics-ttm" / "stable/dividends(sum)"
+  final String? epsSource;
+  final String? bpsSource;
+  final String? dpsSource;
 
-    const StockFundamentals({
-      required this.eps,
-      required this.bps,
-      required this.dps,
-      this.year,
-      this.basDt,
-      this.periodLabel,
-      this.epsLabel,
-      this.bpsLabel,
-      this.dpsLabel,
-      this.epsSource,
-      this.bpsSource,
-      this.dpsSource,
-    });
+  // ==========================================================
+  // ✅ 추가: “재무제표 금액” (신뢰/디버그용)
+  // - 단위는 DART 응답(원 단위)이 기본이라 num?로 받는 게 안전
+  // ==========================================================
+  final num? revenue;    // 매출액
+  final num? opIncome;   // 영업이익 (적자면 음수 가능)
+  final num? netIncome;  // 당기순이익 (적자면 음수 가능)
+  final num? equity;     // 자본총계
+
+  // ✅ 추가: 어떤 조합으로 가져왔는지
+  final String? fsDiv;       // "CFS" / "OFS"
+  final String? reprtCode;   // "11014"(3Q) / "11011"(FY) 등
+  final String? fsSource;    // 예: "OpenDART fnlttSinglAcntAll"
+
+  const StockFundamentals({
+    required this.eps,
+    required this.bps,
+    required this.dps,
+    this.year,
+    this.basDt,
+    this.periodLabel,
+    this.epsLabel,
+    this.bpsLabel,
+    this.dpsLabel,
+    this.epsSource,
+    this.bpsSource,
+    this.dpsSource,
+
+    // ✅ 추가 필드
+    this.revenue,
+    this.opIncome,
+    this.netIncome,
+    this.equity,
+    this.fsDiv,
+    this.reprtCode,
+    this.fsSource,
+  });
 }
 
 class PriceQuote {
