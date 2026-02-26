@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 안드로이드 서명키 및 설정 파일 제외
+**/android/upload-keystore.jks
+**/android/key.properties

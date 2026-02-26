@@ -1,4 +1,4 @@
-package com.example.stock_valuation_app
+package com.kmin.stock_valuation_app
 
 import io.flutter.embedding.android.FlutterActivity
 

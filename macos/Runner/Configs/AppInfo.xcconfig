@@ -8,7 +8,7 @@
 PRODUCT_NAME = stock_valuation_app
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.stockValuationApp
+PRODUCT_BUNDLE_IDENTIFIER = com.kmin.stockValuationApp
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.kmin. All rights reserved.
