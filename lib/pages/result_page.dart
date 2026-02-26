@@ -475,7 +475,10 @@ class _ResultPageState extends State<ResultPage> {
           ),
         ],
       ),
-      bottomNavigationBar: const AdBanner(),
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        child: AdBanner(),
+      ),
       body: _loading
           ? Center(
               child: Column(
@@ -539,35 +542,34 @@ class _ResultPageState extends State<ResultPage> {
       rating = ValuationService.interpret5(result, rPct);
     }
 
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        _headerCard(name, code),
-        const SizedBox(height: 8),
+    return SafeArea(
+      // 노치/라운드/제스처 영역 + 최소 12 padding 확보
+      minimum: const EdgeInsets.all(12),
+      child: ListView(
+        padding: EdgeInsets.zero, // ✅ SafeArea에서 이미 패딩 주니까 0으로
+        children: [
+          _headerCard(name, code),
+          const SizedBox(height: 8),
 
-        // ✅ rating 카드 탭도 눈 아이콘과 동일 동작
-        if (rating != null) ...[
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: _toggleViewMode,
-            child: _showAdvanced ? _ratingCardCompact(rating) : _ratingCardLarge(rating),
-          ),
+          if (rating != null) ...[
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: _toggleViewMode,
+              child: _showAdvanced ? _ratingCardCompact(rating) : _ratingCardLarge(rating),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          _missingDataHintCard(),
+          const SizedBox(height: 8),
+          _inputCard(),
+          const SizedBox(height: 8),
+          _resultCard(currentPrice: price, result: result, calcError: calcError),
+          const SizedBox(height: 8),
+          _sellGuideCard(result: result, calcError: calcError),
           const SizedBox(height: 8),
         ],
-
-        // ✅ 미싱일 때만 카드 존재 + 탭=눈아이콘
-        _missingDataHintCard(),
-        const SizedBox(height: 8),
-
-        _inputCard(),
-        const SizedBox(height: 8),
-
-        _resultCard(currentPrice: price, result: result, calcError: calcError),
-        const SizedBox(height: 8),
-
-        _sellGuideCard(result: result, calcError: calcError),
-        const SizedBox(height: 8),
-      ],
+      ),
     );
   }
 

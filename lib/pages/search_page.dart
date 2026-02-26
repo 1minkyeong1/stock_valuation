@@ -210,10 +210,12 @@ class _SearchPageState extends State<SearchPage> {
 
       // ✅ 검색은 딱 1번만
       final r = await widget.hub.search(_tab, mapped);
+      final isManualKeyword = keyword != null;
 
       if (!mounted) return;
       if (seq != _searchSeq) return;            // 최신 요청 아니면 폐기
-      if (_controller.text.trim() != q) return; // 입력이 바뀌면 폐기
+      //if (_controller.text.trim() != q) return; // 입력이 바뀌면 폐기
+      if (!isManualKeyword && _controller.text.trim() != q) return;   // 키위드를 썼을 때만 체크
 
       setState(() {
         _results = r;
@@ -458,6 +460,35 @@ class _SearchPageState extends State<SearchPage> {
   // =========================
   // UI 조각들
   // =========================
+  Future<void> _changeMarketTab(Market next) async {
+    if (_tab == next) return;
+
+    // 탭 변경 UI 반영
+    if (!mounted) return;
+    setState(() => _tab = next);
+
+    // 탭에 맞는 데이터 로드
+    await _loadFav();
+    await _loadRecents();
+
+    // 검색어 있으면 재검색, 없으면 결과 초기화
+    final q = _controller.text.trim();
+    if (q.isNotEmpty) {
+      await _runSearch(keyword: q);
+    } else {
+      if (!mounted) return;
+      setState(() {
+        _results = [];
+        _loading = false;
+        _error = null;
+      });
+    }
+
+    // 포커스 복귀
+    if (!mounted) return;
+    FocusScope.of(context).requestFocus(_searchFocus);
+  }
+
   Widget _marketTabs() {
     return _leftAccentCard(
       color: _accent2,
@@ -471,45 +502,20 @@ class _SearchPageState extends State<SearchPage> {
               ],
               selected: {_tab},
               style: ButtonStyle(
-                // 선택/비선택 배경
                 backgroundColor: WidgetStateProperty.resolveWith((states) {
                   if (states.contains(WidgetState.selected)) return _accent2.withAlpha(35);
                   return Colors.white.withAlpha(120);
                 }),
-                // 테두리
                 side: WidgetStatePropertyAll(BorderSide(color: _accent2.withAlpha(80))),
-                // 글자색
                 foregroundColor: WidgetStateProperty.resolveWith((states) {
                   if (states.contains(WidgetState.selected)) return _accent2;
                   return Colors.black87;
                 }),
-                // 살짝 둥글게
                 shape: WidgetStatePropertyAll(
                   RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
               ),
-              onSelectionChanged: (s) async {
-                final next = s.first;
-
-                setState(() => _tab = next);
-                await _loadFav();
-                await _loadRecents();
-
-                final q = _controller.text.trim();
-                if (q.isNotEmpty) {
-                  await _runSearch(keyword: q);
-                } else {
-                  if (!mounted) return;
-                  setState(() {
-                    _results = [];
-                    _loading = false;
-                    _error = null;
-                  });
-                }
-
-                if (!mounted) return;
-                FocusScope.of(context).requestFocus(_searchFocus);
-              },
+              onSelectionChanged: (s) => _changeMarketTab(s.first), // ✅ 이것만 남김
             ),
           ),
         ],
@@ -648,11 +654,18 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  // ✅ 검색창: 큰 버튼 제거 + 돋보기(수동검색) + 자동검색(onChanged)
-  Widget _searchBox() {
+  //  검색창
+  Widget _searchBox({bool compact = false}) {
+    final hint = compact
+        ? (_tab == Market.kr ? "종목명/코드" : "티커")
+        : (_tab == Market.kr
+            ? "국내 종목명 또는 코드 (예: 삼성전자 / 005930)"
+            : "미국 티커 (예: AAPL / TSLA)");
+
     return _leftAccentCard(
       color: _accent,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: _controller,
@@ -665,12 +678,29 @@ class _SearchPageState extends State<SearchPage> {
                 focusNode: _searchFocus,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: compact ? 10 : 14,
+                  ),
                   filled: true,
                   fillColor: Colors.white.withAlpha(180),
-                  hintText: _tab == Market.kr
-                      ? "국내 종목명 또는 코드 (예: 삼성전자 / 005930)"
-                      : "미국 티커 (예: AAPL / TSLA)",
-                  prefixIcon: Icon(Icons.search, color: _accent.withAlpha(220)),
+                  hintText: hint,
+                  hintStyle: TextStyle(
+                    fontSize: compact ? 12 : 14,
+                    color: Colors.grey[600],
+                  ),
+
+                  prefixIcon: Icon(Icons.search, color: _accent.withAlpha(220), size: compact ? 20 : 24),
+                  prefixIconConstraints: BoxConstraints(
+                    minWidth: compact ? 40 : 48,
+                    minHeight: compact ? 40 : 48,
+                  ),
+
+                  suffixIconConstraints: BoxConstraints(
+                    minWidth: compact ? 80 : 96,
+                    minHeight: compact ? 40 : 48,
+                  ),
                   suffixIcon: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -678,15 +708,26 @@ class _SearchPageState extends State<SearchPage> {
                         IconButton(
                           tooltip: "지우기",
                           onPressed: _clearSearch,
-                          icon: Icon(Icons.close, color: Colors.grey[700]),
+                          icon: Icon(Icons.close, color: Colors.grey[700], size: compact ? 18 : 22),
+                          padding: EdgeInsets.zero,
+                          constraints: BoxConstraints.tightFor(
+                            width: compact ? 40 : 48,
+                            height: compact ? 40 : 48,
+                          ),
                         ),
                       IconButton(
                         tooltip: "검색",
                         onPressed: hasText ? _runSearch : null,
-                        icon: Icon(Icons.search, color: _accent.withAlpha(230)),
+                        icon: Icon(Icons.search, color: _accent.withAlpha(230), size: compact ? 18 : 22),
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints.tightFor(
+                          width: compact ? 40 : 48,
+                          height: compact ? 40 : 48,
+                        ),
                       ),
                     ],
                   ),
+
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: _accent.withAlpha(70)),
@@ -705,44 +746,48 @@ class _SearchPageState extends State<SearchPage> {
               );
             },
           ),
-          const SizedBox(height: 10),
 
-          // ✅ 안내 배너 (살짝 화려한 톤)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: _accent.withAlpha(18),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _accent.withAlpha(55)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.auto_awesome, size: 18, color: _accent.withAlpha(220)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "자동검색이 되며, 필요하면 오른쪽 돋보기로 즉시 검색할 수 있어요.",
-                    style: TextStyle(color: Colors.grey[800], fontSize: 12),
+          // ✅ 세로모드에서만 배너 보여줌(가로모드는 공간 확보)
+          if (!compact) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: _accent.withAlpha(18),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _accent.withAlpha(55)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.auto_awesome, size: 18, color: _accent.withAlpha(220)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "자동검색이 되며, 필요하면 오른쪽 돋보기로 즉시 검색할 수 있어요.",
+                      style: TextStyle(color: Colors.grey[800], fontSize: 12),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
-  }  
+  }
 
-  // ✅ 검색 결과/히스토리 영역은 아래 Expanded에서만 바뀌게(검색창은 고정!)
   @override
   Widget build(BuildContext context) {
     final q = _controller.text.trim();
     final showHistory = q.isEmpty;
+    final isLand = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    final pad = EdgeInsets.all(isLand ? 8 : 12);
 
     return Scaffold(
-      resizeToAvoidBottomInset: true,
       appBar: AppBar(
+        toolbarHeight: isLand ? 48 : null,
         title: const Text(
           "종목 검색",
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
@@ -762,7 +807,7 @@ class _SearchPageState extends State<SearchPage> {
               shadowColor: WidgetStatePropertyAll(Colors.transparent),
               surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
             ),
-            icon: const Icon(Icons.error_outline), // ⭕ 테두리 + !
+            icon: const Icon(Icons.error_outline),
             onPressed: () {
               Navigator.push(
                 context,
@@ -775,54 +820,70 @@ class _SearchPageState extends State<SearchPage> {
       bottomNavigationBar: const AdBanner(),
       body: SafeArea(
         child: Container(
-          color: _accent.withAlpha(8), // ✅ 페이지 전체 배경 틴트
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                _marketTabs(),
-                const SizedBox(height: 10),
-                _searchBox(),
-                const SizedBox(height: 10),
-
-                 if (_tab == Market.us) ...[
-                  const SizedBox(height: 6),
-                  Row(
+          color: _accent.withAlpha(8),
+          child: CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              // ✅ 상단도 같이 스크롤
+              SliverPadding(
+                padding: pad,
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Icon(Icons.info_outline, size: 16, color: Colors.grey),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          "네이버 비교는 티커로 검색이 필요할 수 있어요. (우측 ? 참고)",
-                          style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                      _marketTabs(),
+                      SizedBox(height: isLand ? 6 : 10),
+
+                      // ✅ 검색창(가로모드: 컴팩트 + 배너 숨김)
+                      _searchBox(compact: isLand),
+
+                      SizedBox(height: isLand ? 6 : 10),
+
+                      // (선택) 미국 탭 안내
+                      if (_tab == Market.us && !isLand) ...[
+                        Row(
+                          children: [
+                            const Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                "네이버 비교는 티커로 검색이 필요할 수 있어요. (우측 ? 참고)",
+                                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                      ],
+
+                      if (_loading) const LinearProgressIndicator(),
+                      if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                        ),
+
+                      const SizedBox(height: 8),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                ],
-                if (_loading) const LinearProgressIndicator(),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                  ),
-
-                const SizedBox(height: 10),
-
-                Expanded(
-                  child: showHistory ? _historyList() : _resultList(),
                 ),
-              ],
-            ),
+              ),
+
+              // ✅ 아래 리스트도 동일 스크롤에 붙임
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(pad.left, 0, pad.right, pad.bottom),
+                sliver: showHistory ? _historySliver() : _resultSliver(),
+              ),
+            ],
           ),
-        ),  
+        ),
       ),
     );
   }
 
   Widget _historyList() {
-    return ListView(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_recents.isNotEmpty) ...[
           _sectionHeader(
@@ -836,6 +897,7 @@ class _SearchPageState extends State<SearchPage> {
             height: 120,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
               itemCount: _recents.length,
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (_, i) {
@@ -869,11 +931,15 @@ class _SearchPageState extends State<SearchPage> {
             height: 120,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
               itemCount: _favorites.length,
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (_, i) {
                 final s = _favorites[i];
-                return _stockMiniCard(s, onLongPress: () => _confirmDeleteFavorite(s));
+                return _stockMiniCard(
+                  s,
+                  onLongPress: () => _confirmDeleteFavorite(s),
+                );
               },
             ),
           ),
@@ -890,11 +956,16 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _resultList() {
+  SliverToBoxAdapter _historySliver() {
+    return SliverToBoxAdapter(child: _historyList());
+  }
+
+  Widget _resultSliver() {
     final q = _controller.text.trim();
     final mapped = _mapQueryByTab(_tab, q);
 
-    final looksTicker = _looksLikeUsTicker(mapped) && !SearchAlias.looksLikeKrCode(mapped);
+    final looksTicker =
+        _looksLikeUsTicker(mapped) && !SearchAlias.looksLikeKrCode(mapped);
 
     final emptyDesc = (_tab == Market.kr)
         ? (looksTicker
@@ -902,17 +973,31 @@ class _SearchPageState extends State<SearchPage> {
             : "종목명/코드를 다시 확인해보세요.")
         : "티커를 다시 확인해보세요.";
 
-    return (_results.isEmpty && !_loading)
-        ? _emptyHintCard(
-            icon: Icons.search_off,
-            title: "검색 결과가 없어요",
-            desc: emptyDesc,
-          )
-        : ListView.separated(
-            itemCount: _results.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 6),
-            itemBuilder: (_, i) => _resultCardTile(_results[i]),
-          );
+    // 결과 없고 로딩도 아니면: 빈 안내 카드만 보여주기
+    if (_results.isEmpty && !_loading) {
+      return SliverToBoxAdapter(
+        child: _emptyHintCard(
+          icon: Icons.search_off,
+          title: "검색 결과가 없어요",
+          desc: emptyDesc,
+        ),
+      );
+    }
+
+    // 결과 리스트 (separator 포함)
+    final count = _results.length;
+    final childCount = (count == 0) ? 0 : (count * 2 - 1);
+
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, i) {
+          if (i.isOdd) return const SizedBox(height: 6);
+          final idx = i ~/ 2;
+          return _resultCardTile(_results[idx]);
+        },
+        childCount: childCount,
+      ),
+    );
   }
 
   Widget _emptyHintCard({

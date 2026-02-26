@@ -36,7 +36,6 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     super.initState();
     _f = widget.initialFundamentals;
 
-    // initial이 없으면 바로 로드
     if (_f == null) {
       _reload();
     }
@@ -72,6 +71,8 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
 
   bool get _isKR => widget.market == Market.kr;
 
+  bool get _isLand => MediaQuery.of(context).orientation == Orientation.landscape;
+
   String _fmtBasDt(String yyyymmdd) {
     final s = yyyymmdd.trim();
     if (s.length != 8) return s;
@@ -80,8 +81,6 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
 
   String _fmtMoney(num? v) {
     if (v == null) return '-';
-    // 현재 모델은 KR 원 단위 기준으로 fmtWon 사용해왔으니 그대로 유지
-    // (US까지 확장하려면 fundamentals의 통화/단위를 명확히 한 뒤 별도 포맷 추천)
     return _isKR ? fmtWon(v) : fmtUsd(v);
   }
 
@@ -106,9 +105,15 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     final name = widget.item.name;
     final code = widget.item.code;
 
+    final pad = EdgeInsets.all(_isLand ? 12 : 16);
+
     return Scaffold(
       appBar: AppBar(
-        title: Text("$name 재무제표"),
+        title: Text(
+          "$name 재무제표",
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             tooltip: "새로고침",
@@ -117,26 +122,28 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : (_error != null ? _errorView() : _body(name: name, code: code)),
+
+      // ✅ SafeArea + minimum padding으로 좌/우 “잘림(노치/라운드)” 방지
+      body: SafeArea(
+        minimum: pad,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : (_error != null ? _errorView() : _body(name: name, code: code)),
+      ),
     );
   }
 
   Widget _errorView() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("불러오기 실패: $_error", style: const TextStyle(color: Colors.red)),
-          const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: _reload,
-            child: const Text("다시 시도"),
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text("불러오기 실패: $_error", style: const TextStyle(color: Colors.red)),
+        const SizedBox(height: 12),
+        ElevatedButton(
+          onPressed: _reload,
+          child: const Text("다시 시도"),
+        ),
+      ],
     );
   }
 
@@ -147,23 +154,17 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
       return const Center(child: Text("데이터가 없습니다."));
     }
 
-    // 재무 원본(요약 4개) 유무
     final hasAny = f.revenue != null ||
         f.opIncome != null ||
         f.netIncome != null ||
         f.equity != null;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.zero, // ✅ SafeArea(minimum)에서 패딩 담당
       children: [
         _headerCard(name: name, code: code, f: f),
         const SizedBox(height: 12),
-
-        if (!hasAny)
-          _emptyHintCard()
-        else
-          _fsSummaryCard(f),
-
+        if (!hasAny) _emptyHintCard() else _fsSummaryCard(f),
         const SizedBox(height: 12),
         _epsBpsDpsCard(f),
         const SizedBox(height: 12),
@@ -188,6 +189,8 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
           children: [
             Text(
               "$name ($code)",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
@@ -199,11 +202,18 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
             ),
             if (meta.isNotEmpty) ...[
               const SizedBox(height: 6),
+              // ✅ 메타는 길어도 줄바꿈 허용
               Text(meta, style: const TextStyle(fontSize: 12, color: Colors.grey)),
             ],
             if (f.fsSource != null && f.fsSource!.trim().isNotEmpty) ...[
               const SizedBox(height: 2),
-              Text("fsSource: ${f.fsSource}", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              // ✅ 너무 길면 2줄까지만 + 말줄임
+              Text(
+                "fsSource: ${f.fsSource}",
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
             ],
           ],
         ),
@@ -247,9 +257,8 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
   }
 
   Widget _epsBpsDpsCard(StockFundamentals f) {
-    // 값 자체는 평가에서 쓰는 EPS/BPS/DPS (fundamentals에 이미 들어있음)
-    // 표기만: KR=원, US=$ (현재 number_format.dart에 fmtUsd/fmtWon이 있으니 사용)
-    String fmtMetric(num v) => _isKR ? fmtWonDecimal(v, fractionDigits: 0) : fmtUsdDecimal(v, fractionDigits: 2);
+    String fmtMetric(num v) =>
+        _isKR ? fmtWonDecimal(v, fractionDigits: 0) : fmtUsdDecimal(v, fractionDigits: 2);
 
     return Card(
       elevation: 0,
@@ -285,7 +294,12 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     );
   }
 
+  // ✅ 가로에서 숫자/통화 문자열이 길어도 “오른쪽 끝”이 안 잘리도록:
+  // - value 영역 maxWidth 제한 + 말줄임
+  // - textAlign right
   Widget _row(String label, String value, {String? helper}) {
+    final valueMaxW = _isLand ? 260.0 : 180.0;
+
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
@@ -305,7 +319,21 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
               ],
             ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(width: 12),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: valueMaxW),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
         ],
       ),
     );
