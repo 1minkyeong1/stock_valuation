@@ -294,48 +294,86 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     );
   }
 
-  // ✅ 가로에서 숫자/통화 문자열이 길어도 “오른쪽 끝”이 안 잘리도록:
-  // - value 영역 maxWidth 제한 + 말줄임
-  // - textAlign right
+  // 가로에서 숫자/통화 문자열이 길어도 “오른쪽 끝”이 안 잘리도록
   Widget _row(String label, String value, {String? helper}) {
-    final valueMaxW = _isLand ? 260.0 : 180.0;
+    final mq = MediaQuery.of(context);
+    final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0);
+    final bool vertical = ts >= 1.35;
+
+    final labelStyle = TextStyle(color: Colors.grey[700], fontSize: 12);
+    final helperStyle = TextStyle(color: Colors.grey[600], fontSize: 11);
+    final valueStyle = const TextStyle(fontWeight: FontWeight.w700);
+
+    Widget valueWidget() {
+      // '-' 같은 짧은 값은 그냥
+      final v = value.trim();
+      if (v.isEmpty || v == '-') {
+        return Text(value, style: valueStyle, textAlign: TextAlign.right);
+      }
+
+      // ✅ 핵심: 잘림(...) 대신 “영역 안에 들어오도록” 자동 축소
+      return FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerRight,
+        child: Text(
+          value,
+          maxLines: 1,
+          softWrap: false,
+          textAlign: TextAlign.right,
+          style: valueStyle,
+        ),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
+      child: vertical
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+                Text(label, style: labelStyle),
                 if (helper != null) ...[
                   const SizedBox(height: 2),
-                  Text(helper, style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                  Text(helper, style: helperStyle),
                 ],
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: SizedBox(
+                    // 세로형에서는 값이 충분히 크도록 전체폭 활용
+                    width: double.infinity,
+                    child: valueWidget(),
+                  ),
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: labelStyle),
+                      if (helper != null) ...[
+                        const SizedBox(height: 2),
+                        Text(helper, style: helperStyle),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // 가로형: 오른쪽 값은 남는 공간에서 scaleDown
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: valueWidget(),
+                  ),
+                ),
               ],
             ),
-          ),
-          const SizedBox(width: 12),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: valueMaxW),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

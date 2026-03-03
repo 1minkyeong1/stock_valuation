@@ -39,6 +39,8 @@ class _SearchPageState extends State<SearchPage> {
   final _recentStore = RecentStore();
   List<StockSearchItem> _recents = [];
 
+  List<AliasGroup> _usAliasGroups = [];
+
  @override
   void initState() {
     super.initState();
@@ -79,6 +81,62 @@ class _SearchPageState extends State<SearchPage> {
   bool _isComposing() {
     final c = _controller.value.composing;
     return c.isValid && !c.isCollapsed;
+  }
+
+  // 미국 검색 멀티조회
+  Widget _usAliasPicker({required bool compact}) {
+    // US 탭이 아니면 숨김
+    if (_tab != Market.us) return const SizedBox.shrink();
+
+    // 멀티 후보가 2개 이상일 때만 노출
+    if (_usAliasGroups.length < 2) return const SizedBox.shrink();
+
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+            child: Text(
+              "매핑된 후보 (${_usAliasGroups.length})",
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          ..._usAliasGroups.map((g) {
+            // g.primaryName: 표시용 이름(예: "마이크로" 또는 "버크셔")
+            // g.code: 실제 티커(예: MSFT, BRK-B)
+            final title = g.primaryName;
+            final ticker = g.code;
+
+            return ListTile(
+              dense: compact,
+              title: Text("$title ($ticker)"),
+              onTap: () {
+                // ✅ 선택한 티커로 검색 실행
+                _controller.text = ticker;
+                _controller.selection = TextSelection.collapsed(offset: ticker.length);
+
+                // 후보는 선택 후 숨김
+                setState(() => _usAliasGroups = []);
+
+                _runSearch(keyword: ticker); // 실제 검색 1번
+              },
+            );
+          }),
+          const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+
+  // 높이계산함수(잘림현상 사이즈조절)
+  double _miniStripHeight(BuildContext context) {
+    // 1.0(기본) ~ 2.0(최대 근처) 범위로 제한
+    final ts = MediaQuery.textScaleFactorOf(context).clamp(1.0, 2.0);
+
+    // 기본 120에서, 글자 커질수록 최대 200까지 늘림
+    final h = 120.0 + (ts - 1.0) * 80.0; // ts=2.0이면 200
+    return h.clamp(120.0, 200.0);
   }
 
   // =========================
@@ -182,19 +240,44 @@ class _SearchPageState extends State<SearchPage> {
       _error = null;
     });
 
+    // ✅ US 탭: 한글 입력이면 멀티 후보를 먼저 만든다
+    List<AliasGroup> aliasGroups = const [];
+    if (_tab == Market.us && SearchAlias.hasHangul(q)) {
+      aliasGroups = SearchAlias.resolveUsGroups(q, limit: 12);
+      if (!mounted) return;
+      setState(() => _usAliasGroups = aliasGroups);
+    } else {
+      if (!mounted) return;
+      setState(() => _usAliasGroups = []);
+    }
+
+    // ✅ 멀티 후보가 2개 이상이면: 자동으로 1개를 고르지 말고 "선택"시키기
+    if (_tab == Market.us && aliasGroups.length >= 2) {
+      if (!mounted) return;
+      if (seq != _searchSeq) return;
+
+      setState(() {
+        _loading = false;
+        _results = [];
+     //   _error = "여러 종목이 매핑됩니다. 아래에서 하나를 선택해 주세요.";
+      });
+      FocusScope.of(context).requestFocus(_searchFocus);
+      return; // ✅ 여기서 끝 (hub.search 호출 안 함)
+    }
+
     try {
-      // ✅ 탭에 맞게 쿼리 변환(US: 한글->티커, KR: 한글->코드)
+      // 탭에 맞게 쿼리 변환(US: 한글->티커, KR: 한글->코드)
       final mapped = _mapQueryByTab(_tab, q);
 
       debugPrint('[Search] tab=$_tab q="$q" mapped="$mapped"');
 
-      // ✅ (추가) US 탭에서 "국내로 보이는" 입력인데 US alias 변환이 안 된 경우 → 안내만
+      //  US 탭에서 "국내로 보이는" 입력인데 US alias 변환이 안 된 경우 → 안내만
       if (_tab == Market.us) {
-        final usHit = SearchAlias.resolveUs(q);
+        final bool hasUsAlias = aliasGroups.isNotEmpty;
         final bool looksKr = _looksLikeKrQuery(q) || SearchAlias.looksLikeKrCode(q);
 
         // US로 매핑이 안 됐고, KR처럼 보이면: 자동전환 X, 안내만
-        if (usHit == null && looksKr) {
+        if (!hasUsAlias && looksKr) {
           if (!mounted) return;
           if (seq != _searchSeq) return;
 
@@ -255,9 +338,6 @@ class _SearchPageState extends State<SearchPage> {
     if (raw.isEmpty) return raw;
 
     if (tab == Market.kr) {
-      // ✅ (중요) 한글/별칭 → 코드 치환 제거
-      // final hit = SearchAlias.resolveKr(raw);
-      // if (hit != null) return hit.code;
 
       // 1) 숫자 4~6자리면 6자리로 패딩
       final digits = raw.replaceAll(' ', '');
@@ -274,9 +354,15 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     // tab == Market.us
-    final hit = SearchAlias.resolveUs(raw);
-    if (hit != null) return hit.code;
+    final groups = SearchAlias.resolveUsGroups(raw, limit: 12);
 
+    // ✅ 딱 1개로 확정될 때만 티커로 치환해서 검색
+    if (groups.length == 1) return groups.first.code;
+
+    // ✅ 여러 개면 원문 유지(실제 검색은 위 _runSearch에서 return 처리됨)
+    if (groups.length >= 2) return raw;
+
+    // alias 없으면 기존처럼
     return raw.toUpperCase();
   }
 
@@ -588,11 +674,25 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _stockMiniCard(StockSearchItem s, {VoidCallback? onLongPress}) {
+    final mq = MediaQuery.of(context);
+    final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0);
+
+    final cardW = (180.0 + (ts - 1.0) * 70.0).clamp(180.0, 260.0);
+
+    Widget clampScale(Widget child, {double max = 1.2}) {
+      final cur = mq.textScaler.scale(1.0);
+      if (cur <= max) return child;
+      return MediaQuery(
+        data: mq.copyWith(textScaler: TextScaler.linear(max)),
+        child: child,
+      );
+    }
+
     return InkWell(
       onTap: () => _openResult(s, recordRecent: true),
       onLongPress: onLongPress,
       child: Container(
-        width: 180,
+        width: cardW,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: _accent.withAlpha(10),
@@ -602,14 +702,42 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              s.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 6),
-            Text(s.code, style: TextStyle(color: Colors.grey[800])),
-            Text(s.market, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+            Text(
+              s.code,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Colors.grey[800]),
+            ),
+            clampScale(
+              Text(
+                s.market,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              ),
+              max: 1.25,
+            ),
             const Spacer(),
             Row(
               children: [
-                const Text("평가 보기", style: TextStyle(fontSize: 12)),
+                Expanded(
+                  child: clampScale(
+                    const Text(
+                      "평가 보기",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    max: 1.2,
+                  ),
+                ),
                 const SizedBox(width: 4),
                 Icon(Icons.chevron_right, size: 16, color: _accent.withAlpha(220)),
               ],
@@ -672,6 +800,10 @@ class _SearchPageState extends State<SearchPage> {
             builder: (context, v, child) {
               final hasText = v.text.trim().isNotEmpty;
 
+              // 최소폭도 "항상 2칸(지우기 + 검색)" 기준으로 고정
+              final btnSize = compact ? 38.0 : 44.0;
+              final rightPad = compact ? 2.0 : 4.0;
+
               return TextField(
                 key: const ValueKey('searchField'),
                 controller: _controller,
@@ -691,40 +823,48 @@ class _SearchPageState extends State<SearchPage> {
                     color: Colors.grey[600],
                   ),
 
-                  prefixIcon: Icon(Icons.search, color: _accent.withAlpha(220), size: compact ? 20 : 24),
-                  prefixIconConstraints: BoxConstraints(
-                    minWidth: compact ? 40 : 48,
+                  // ✅ 왼쪽 prefix 돋보기 제거
+                  prefixIcon: null,
+                  prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+
+                  suffixIconConstraints: BoxConstraints(
+                    // 지우기 슬롯 1칸 + 검색 1칸 + 오른쪽 패딩
+                    minWidth: btnSize * 2 + rightPad,
                     minHeight: compact ? 40 : 48,
                   ),
 
-                  suffixIconConstraints: BoxConstraints(
-                    minWidth: compact ? 80 : 96,
-                    minHeight: compact ? 40 : 48,
-                  ),
                   suffixIcon: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (hasText)
-                        IconButton(
-                          tooltip: "지우기",
-                          onPressed: _clearSearch,
-                          icon: Icon(Icons.close, color: Colors.grey[700], size: compact ? 18 : 22),
-                          padding: EdgeInsets.zero,
-                          constraints: BoxConstraints.tightFor(
-                            width: compact ? 40 : 48,
-                            height: compact ? 40 : 48,
+                      // ✅ 지우기 "자리"는 항상 유지(없으면 투명 + 터치 막기)
+                      SizedBox(
+                        width: btnSize,
+                        height: btnSize,
+                        child: IgnorePointer(
+                          ignoring: !hasText,
+                          child: Opacity(
+                            opacity: hasText ? 1.0 : 0.0,
+                            child: IconButton(
+                              tooltip: "지우기",
+                              onPressed: _clearSearch,
+                              icon: Icon(Icons.close, color: Colors.grey[700], size: compact ? 18 : 22),
+                              padding: EdgeInsets.zero,
+                              constraints: BoxConstraints.tightFor(width: btnSize, height: btnSize),
+                            ),
                           ),
                         ),
+                      ),
+
+                      // ✅ 검색(돋보기)은 항상 같은 자리(맨 오른쪽)
                       IconButton(
                         tooltip: "검색",
                         onPressed: hasText ? _runSearch : null,
-                        icon: Icon(Icons.search, color: _accent.withAlpha(230), size: compact ? 18 : 22),
+                        icon: Icon(Icons.search, color: _accent.withAlpha(235), size: compact ? 22 : 26),
                         padding: EdgeInsets.zero,
-                        constraints: BoxConstraints.tightFor(
-                          width: compact ? 40 : 48,
-                          height: compact ? 40 : 48,
-                        ),
+                        constraints: BoxConstraints.tightFor(width: btnSize, height: btnSize),
                       ),
+
+                      SizedBox(width: rightPad),
                     ],
                   ),
 
@@ -824,7 +964,6 @@ class _SearchPageState extends State<SearchPage> {
           child: CustomScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
-              // ✅ 상단도 같이 스크롤
               SliverPadding(
                 padding: pad,
                 sliver: SliverToBoxAdapter(
@@ -834,12 +973,9 @@ class _SearchPageState extends State<SearchPage> {
                       _marketTabs(),
                       SizedBox(height: isLand ? 6 : 10),
 
-                      // ✅ 검색창(가로모드: 컴팩트 + 배너 숨김)
                       _searchBox(compact: isLand),
-
                       SizedBox(height: isLand ? 6 : 10),
 
-                      // (선택) 미국 탭 안내
                       if (_tab == Market.us && !isLand) ...[
                         Row(
                           children: [
@@ -864,12 +1000,17 @@ class _SearchPageState extends State<SearchPage> {
                         ),
 
                       const SizedBox(height: 8),
+
+                      // ✅ US 멀티 후보 선택 UI (결과 리스트 위에 표시)
+                      if (!showHistory) ...[
+                        _usAliasPicker(compact: isLand),
+                        const SizedBox(height: 8),
+                      ],
                     ],
                   ),
                 ),
               ),
 
-              // ✅ 아래 리스트도 동일 스크롤에 붙임
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(pad.left, 0, pad.right, pad.bottom),
                 sliver: showHistory ? _historySliver() : _resultSliver(),
@@ -882,6 +1023,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _historyList() {
+    final stripH = _miniStripHeight(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -894,7 +1036,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 120,
+            height: stripH,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
@@ -928,7 +1070,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 120,
+            height: stripH,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),

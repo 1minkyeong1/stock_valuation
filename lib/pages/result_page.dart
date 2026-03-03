@@ -1109,6 +1109,18 @@ class _ResultPageState extends State<ResultPage> {
       return const SizedBox.shrink();
     }
 
+    final mq = MediaQuery.of(context);
+    final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0);
+
+    Widget clampScale(Widget child, {double max = 1.25}) {
+      final cur = mq.textScaler.scale(1.0);
+      if (cur <= max) return child;
+      return MediaQuery(
+        data: mq.copyWith(textScaler: TextScaler.linear(max)),
+        child: child,
+      );
+    }
+
     final ratio = price / fairPrice;
     final pct = ratio * 100.0;
 
@@ -1116,6 +1128,9 @@ class _ResultPageState extends State<ResultPage> {
     final fill = clamped / 2.0;
 
     final isUndervalued = ratio <= 1.0;
+
+    // 글자 크게 하면 아래 정보는 세로로 내려가는 게 안전
+    final verticalInfo = ts >= 1.3;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1127,8 +1142,14 @@ class _ResultPageState extends State<ResultPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("현재가 / 적정주가: ${pct.toStringAsFixed(1)}%", style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            "현재가 / 적정주가: ${pct.toStringAsFixed(1)}%",
+            style: const TextStyle(fontWeight: FontWeight.bold),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 8),
+
           LayoutBuilder(
             builder: (context, c) {
               final w = c.maxWidth;
@@ -1166,22 +1187,36 @@ class _ResultPageState extends State<ResultPage> {
               );
             },
           ),
+
           const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: const [
-              Text("0%", style: TextStyle(fontSize: 12)),
-              Text("100%(적정)", style: TextStyle(fontSize: 12)),
-              Text("200%", style: TextStyle(fontSize: 12)),
-            ],
+
+          // ✅ 0/100/200 라벨: Row(잘림) -> Wrap(자동 줄바꿈)
+          clampScale(
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: const [
+                Text("0%", style: TextStyle(fontSize: 12)),
+                Text("100%(적정)", style: TextStyle(fontSize: 12)),
+                Text("200%", style: TextStyle(fontSize: 12)),
+              ],
+            ),
+            max: 1.25,
           ),
+
           const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("현재가: ${_fmtMoney(price)}", style: const TextStyle(fontSize: 12)),
-              Text("적정가: ${_fmtMoney(fairPrice)}", style: const TextStyle(fontSize: 12)),
-            ],
+
+          // ✅ 현재가/적정가: Row(잘림) -> Wrap(자동 줄바꿈)
+          clampScale(
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                Text("현재가: ${_fmtMoney(price)}", style: const TextStyle(fontSize: 12)),
+                Text("적정가: ${_fmtMoney(fairPrice)}", style: const TextStyle(fontSize: 12)),
+              ],
+            ),
+            max: verticalInfo ? 1.35 : 1.25,
           ),
         ],
       ),

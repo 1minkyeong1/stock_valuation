@@ -6,6 +6,16 @@ class AliasHit {
   const AliasHit({required this.code, required this.name});
 }
 
+/// ✅ 같은 code(티커/종목코드)에 대해 여러 한글 이름을 묶어 반환
+class AliasGroup {
+  final String code;
+  final List<String> names; // 중복 alias 묶음
+  const AliasGroup({required this.code, required this.names});
+
+  /// UI에서 대표 이름으로 쓸 때
+  String get primaryName => names.isEmpty ? code : names.first;
+}
+
 class SearchAlias {
   // 한글 포함 여부
   static bool hasHangul(String s) => RegExp(r'[ㄱ-ㅎㅏ-ㅣ가-힣]').hasMatch(s);
@@ -17,9 +27,12 @@ class SearchAlias {
       .replaceAll(RegExp(r'\s+'), '')
       .replaceAll(RegExp(r'[()\-_.,·]'), '');
 
+  static String _cleanCode(String s) => s.trim().toUpperCase();
+
   // -------------------------
   // 🇺🇸 US (한글/별칭 → 티커)
   // -------------------------
+  // ✅ 기존 매핑 그대로 유지 (절대 줄이지 않음)
   static const Map<String, String> usKoToTicker = {
     '애플': 'AAPL',
     '마이크로소프트': 'MSFT',
@@ -39,7 +52,8 @@ class SearchAlias {
     '디즈니': 'DIS',
     '보잉': 'BA',
     'JP모건': 'JPM',
-    '버크셔': 'BRK-B',
+    '버크셔B': 'BRK-B',
+    '버크셔A': 'BRK-A',
     '브로드컴': 'AVGO',
     'AMD': 'AMD',
     '인텔': 'INTC',
@@ -47,7 +61,7 @@ class SearchAlias {
     '팔란티어': 'PLTR',
     '마이크로스트래티지': 'MSTR',
     '아이온큐': 'IONQ',
-    '마이크론':'MU',
+    '마이크론': 'MU',
     '시스코시스템즈': 'CSCO',
     '플란티어': 'PLTR',
     '램리서치': 'LRCX',
@@ -116,7 +130,7 @@ class SearchAlias {
     '사운드하운드AI': 'SOUN',
     '디웨이브퀀텀': 'QBTS',
     '조비에비에이션': 'JOBY',
-    '비트마인이머전' : 'BMNR',
+    '비트마인이머전': 'BMNR',
     '발레ADR': 'VALE',
     '빅베이AI홀딩스': 'BBAI',
     '어레이': 'ARRY',
@@ -166,11 +180,11 @@ class SearchAlias {
     'X웰': 'XWEL',
     '이오밴스바이오테라퓨틱스': 'IOVA',
     '우버': 'UBER',
-    '로켓컴퍼니스' : 'RKT',
+    '로켓컴퍼니스': 'RKT',
     '쾨르마이닝': 'CDE',
     '텔라닥헬스': 'TDOC',
     '비트디지털': 'BTBT',
-    '스텔란티스':'STLA',
+    '스텔란티스': 'STLA',
     '버바이오테크놀로지': 'VIR',
     '나비타스세미컨덕터': 'NVTS',
     '제론': 'GERN',
@@ -315,35 +329,94 @@ class SearchAlias {
     '피그스': 'FIGS',
     '페이오니아': 'PAYO',
     '월트디즈니': 'DIS',
-// 일단 미국 천주까지 등록
-    
+    // 일단 미국 천주까지 등록
   };
 
-  static final Map<String, AliasHit> _usExact = {
-    for (final e in usKoToTicker.entries)
-      norm(e.key): AliasHit(code: e.value, name: e.key),
-  };
+  /// normKey -> (code별 names 묶음)
+  static final Map<String, Map<String, List<String>>> _usExactGroups = () {
+    final out = <String, Map<String, List<String>>>{};
 
-  // 부분매칭은 “한글 입력일 때만” (영문은 오탐 방지)
-  static final List<String> _usKeysByLen = _usExact.keys.toList()
-    ..sort((a, b) => b.length.compareTo(a.length));
+    // 1) 기존 1:1(풀네임)만으로 그룹 구성
+    // - 같은 티커를 여러 한글 이름이 가리키면 names 리스트로 묶임
+    for (final e in usKoToTicker.entries) {
+      final display = e.key;
+      final nk = norm(display);
 
-  static AliasHit? resolveUs(String query) {
+      final code = _cleanCode(e.value);
+      if (code.isEmpty) continue;
+
+      final codeMap = out[nk] ??= <String, List<String>>{};
+      final names = codeMap[code] ??= <String>[];
+      if (!names.contains(display)) names.add(display);
+    }
+
+    return out;
+  }();
+
+  static final List<String> _usKeys = _usExactGroups.keys.toList();
+
+  // -------------------------
+  // 🇺🇸 US resolve (GROUPED)
+  // -------------------------
+
+  /// ✅ “중복 code를 names 리스트로 묶어서” 결과 반환
+  /// - 같은 티커가 여러 한글 이름으로 등록돼도 1개로 묶입니다.
+  static List<AliasGroup> resolveUsGroups(String query, {int limit = 20}) {
     final raw = query.trim();
     final q = norm(raw);
+    if (q.isEmpty) return const [];
 
-    // exact
-    final exact = _usExact[q];
-    if (exact != null) return exact;
-
-    // partial (한글일 때만, 2글자 이상만)
-    if (hasHangul(raw) && q.length >= 2) {
-      for (final k in _usKeysByLen) {
-        // ✅ 사용자가 짧게 입력해도 매칭되도록 k.contains(q)
-        if (k.contains(q) || q.contains(k)) return _usExact[k];
+    final result = <String, List<String>>{}; // code -> names (insertion-ordered)
+    void mergeCodeMap(Map<String, List<String>>? codeMap) {
+      if (codeMap == null) return;
+      for (final e in codeMap.entries) {
+        if (result.length >= limit) return;
+        final code = e.key;
+        final names = result[code] ??= <String>[];
+        for (final n in e.value) {
+          if (!names.contains(n)) names.add(n);
+        }
       }
     }
-    return null;
+
+    // 1) exact
+    mergeCodeMap(_usExactGroups[q]);
+
+    // 2) partial (한글 + 2글자 이상)
+    if (hasHangul(raw) && q.length >= 2 && result.length < limit) {
+      final matches = <_ScoredKey>[];
+      for (final k in _usKeys) {
+        final score = _matchScore(k, q);
+        if (score == null) continue;
+        matches.add(_ScoredKey(k, score));
+      }
+
+      matches.sort((a, b) {
+        final s = a.score.compareTo(b.score);
+        if (s != 0) return s;
+        final la = a.key.length;
+        final lb = b.key.length;
+        if (la != lb) return la.compareTo(lb);
+        return a.key.compareTo(b.key);
+      });
+
+      for (final mk in matches) {
+        if (result.length >= limit) break;
+        mergeCodeMap(_usExactGroups[mk.key]);
+      }
+    }
+
+    return result.entries
+        .map((e) => AliasGroup(code: e.key, names: e.value))
+        .toList();
+  }
+
+  /// ✅ 기존 호환: 1개만 필요할 때(대표 1개)
+  static AliasHit? resolveUs(String query) {
+    final groups = resolveUsGroups(query, limit: 1);
+    if (groups.isEmpty) return null;
+    final g = groups.first;
+    return AliasHit(code: g.code, name: g.primaryName);
   }
 
   // -------------------------
@@ -368,39 +441,91 @@ class SearchAlias {
     '케이지모빌리티': '003620',
     '케이쥐모빌리티': '003620',
     '엔에이치투자증권': '005940',
-
   };
 
-  static final Map<String, AliasHit> _krExact = {
-    for (final e in krKoToCode.entries)
-      norm(e.key): AliasHit(code: e.value, name: e.key),
-  };
+  static final Map<String, Map<String, List<String>>> _krExactGroups = () {
+    final out = <String, Map<String, List<String>>>{};
 
-  static final List<String> _krKeysByLen = _krExact.keys.toList()
-    ..sort((a, b) => b.length.compareTo(a.length));
+    for (final e in krKoToCode.entries) {
+      final display = e.key;
+      final nk = norm(display);
+      final code = e.value.trim();
+      if (code.isEmpty) continue;
 
+      final codeMap = out[nk] ??= <String, List<String>>{};
+      final names = codeMap[code] ??= <String>[];
+      if (!names.contains(display)) names.add(display);
+    }
+
+    return out;
+  }();
+
+  static final List<String> _krKeys = _krExactGroups.keys.toList();
   static const int _minPartialLen = 2;
 
-  static AliasHit? resolveKr(String query) {
+  static List<AliasGroup> resolveKrGroups(String query, {int limit = 20}) {
     final raw = query.trim();
     final q = norm(raw);
+    if (q.isEmpty) return const [];
 
-    final exact = _krExact[q];
-    if (exact != null) return exact;
-
-    if (hasHangul(raw) && q.length >= _minPartialLen) {
-      for (final k in _krKeysByLen) {
-        // ✅ 입력이 prefix일 때 매칭 (아크 → 아크릴)
-        if (k.startsWith(q) || k.contains(q)) return _krExact[k];
+    final result = <String, List<String>>{};
+    void mergeCodeMap(Map<String, List<String>>? codeMap) {
+      if (codeMap == null) return;
+      for (final e in codeMap.entries) {
+        if (result.length >= limit) return;
+        final code = e.key;
+        final names = result[code] ??= <String>[];
+        for (final n in e.value) {
+          if (!names.contains(n)) names.add(n);
+        }
       }
     }
-    return null;
+
+    // exact
+    mergeCodeMap(_krExactGroups[q]);
+
+    // partial
+    if (hasHangul(raw) && q.length >= _minPartialLen && result.length < limit) {
+      final matches = <_ScoredKey>[];
+      for (final k in _krKeys) {
+        final score = _matchScore(k, q);
+        if (score == null) continue;
+        matches.add(_ScoredKey(k, score));
+      }
+
+      matches.sort((a, b) {
+        final s = a.score.compareTo(b.score);
+        if (s != 0) return s;
+        final la = a.key.length;
+        final lb = b.key.length;
+        if (la != lb) return la.compareTo(lb);
+        return a.key.compareTo(b.key);
+      });
+
+      for (final mk in matches) {
+        if (result.length >= limit) break;
+        mergeCodeMap(_krExactGroups[mk.key]);
+      }
+    }
+
+    return result.entries
+        .map((e) => AliasGroup(code: e.key, names: e.value))
+        .toList();
   }
 
-  // ✅ KR 코드 통일: 6자리 숫자 + "0007C0" 같은 5숫자+영숫자1
+  static AliasHit? resolveKr(String query) {
+    final groups = resolveKrGroups(query, limit: 1);
+    if (groups.isEmpty) return null;
+    final g = groups.first;
+    return AliasHit(code: g.code, name: g.primaryName);
+  }
+
+  // -------------------------
+  // 공통 유틸
+  // -------------------------
   static bool looksLikeKrCode(String s) {
     final t = s.trim().toUpperCase().replaceAll(' ', '');
-    if (RegExp(r'^\d{4,6}$').hasMatch(t)) return true;       // 4~6자리 숫자
+    if (RegExp(r'^\d{4,6}$').hasMatch(t)) return true; // 4~6자리 숫자
     if (RegExp(r'^\d{5}[A-Z0-9]$').hasMatch(t)) return true; // 0007C0
     return false;
   }
@@ -412,4 +537,18 @@ class SearchAlias {
   static void debugLog(String msg) {
     if (kDebugMode) debugPrint('[Alias] $msg');
   }
+
+  static int? _matchScore(String key, String q) {
+    if (key == q) return 0;
+    if (key.startsWith(q)) return 1;
+    if (key.contains(q)) return 2;
+    if (q.contains(key)) return 3;
+    return null;
+  }
+}
+
+class _ScoredKey {
+  final String key;
+  final int score;
+  _ScoredKey(this.key, this.score);
 }
