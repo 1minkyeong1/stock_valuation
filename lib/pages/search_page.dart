@@ -132,7 +132,9 @@ class _SearchPageState extends State<SearchPage> {
   // 높이계산함수(잘림현상 사이즈조절)
   double _miniStripHeight(BuildContext context) {
     // 1.0(기본) ~ 2.0(최대 근처) 범위로 제한
-    final ts = MediaQuery.textScaleFactorOf(context).clamp(1.0, 2.0);
+    final double ts = (MediaQuery.maybeTextScalerOf(context)?.scale(1.0) ?? 1.0)
+    .clamp(1.0, 2.0)
+    .toDouble();
 
     // 기본 120에서, 글자 커질수록 최대 200까지 늘림
     final h = 120.0 + (ts - 1.0) * 80.0; // ts=2.0이면 200
