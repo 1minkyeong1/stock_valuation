@@ -71,12 +71,12 @@ class _ResultPageState extends State<ResultPage> {
   late final TextEditingController _dpsCtrl;
 
   // r(%) 슬라이더
-  double rPct = 9.0;
+  double rPct = 5.0; // 9.0 -> 5.0
 
   // 초기값(Reset)
   double _initPrice = 0.0;
   StockFundamentals _initF = const StockFundamentals(eps: 0, bps: 0, dps: 0);
-  double _initR = 9.0;
+  double _initR = 5.0; // 9.0 -> 5.0
 
   // 고급보기 토글용 (true=고급/작은카드, false=초급/큰카드)
   bool _showAdvanced = true;
@@ -284,7 +284,7 @@ class _ResultPageState extends State<ResultPage> {
       _setStage('초기값 반영');
       _initPrice = price;
       _initF = f;
-      _initR = 9.0;
+      _initR = 5.0;
       rPct = _initR;
 
       _applyToTextFields(price: price, f: f);
@@ -954,117 +954,145 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 결과카드
   Widget _resultCard({
     required double currentPrice,
     required ValuationResult? result,
     required String? calcError,
   }) {
+    if (calcError != null || result == null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            "계산 불가: ${calcError ?? "데이터가 부족합니다."}",
+            style: const TextStyle(color: Colors.red),
+          ),
+        ),
+      );
+    }
+
+    final r = result;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: (calcError != null || result == null)
-            ? Text(
-                "계산 불가: ${calcError ?? "데이터가 부족합니다."}",
-                style: const TextStyle(color: Colors.red),
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("결과", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("결과",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
 
-                  // 초보 모드
-                  if (!_showAdvanced) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _kpiBox(
-                            title: "적정주가",
-                            value: _fmtMoney(result.fairPrice),
-                            subtitle: "BPS × (ROE / r)",
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _kpiBox(
-                            title: "기대수익률(%)",
-                            value:
-                                "${result.expectedReturnPct >= 0 ? '+' : ''}${result.expectedReturnPct.toStringAsFixed(1)}%",
-                            valueColor: result.expectedReturnPct >= 0 ? Colors.green : Colors.red,
-                            subtitle: "적정가까지 상승 여지",
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    _priceFairGauge(price: currentPrice, fairPrice: result.fairPrice),
-                    const SizedBox(height: 10),
-                    Text(
-                      "현황평가: ${result.gapPct.toStringAsFixed(1)}%  (100% 미만이면 저평가 쪽)",
-                      style: TextStyle(color: Colors.grey[700], fontSize: 12),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      "※ 상단 눈 아이콘을 켜면 ROE, 배당수익률, PER/PBR 등 상세 지표를 볼 수 있어요.",
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-
-                  // 고급 모드
-                  if (_showAdvanced) ...[
-                    _sectionCard("가치(Valuation)", [
-                      _metricTile(
-                        label: "적정주가",
-                        value: _fmtMoney(result.fairPrice),
-                        helper: "BPS × (ROE / r)",
-                        icon: Icons.price_check,
+            // ✅ 초보 모드
+            if (!_showAdvanced) ...[
+              // ✅ 두 KPI 박스 높이 자동 동일화 (고정 height 제거)
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _kpiBox(
+                        title: "적정주가",
+                        value: _fmtMoney(r.fairPrice),
+                        subtitle: "BPS × (ROE / r)",
                       ),
-                      _metricTile(
-                        label: "현황평가(현재/적정)",
-                        value: "${result.gapPct.toStringAsFixed(1)}%",
-                        helper: "100% 미만이면 저평가 쪽",
-                        icon: Icons.bar_chart,
-                      ),
-                      _metricTile(
-                        label: "기대수익률",
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _kpiBox(
+                        title: "기대수익률(%)",
                         value:
-                            "${result.expectedReturnPct >= 0 ? '+' : ''}${result.expectedReturnPct.toStringAsFixed(1)}%",
-                        helper: "적정가까지 상승 여지",
-                        icon: Icons.trending_up,
+                            "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
+                        valueColor:
+                            r.expectedReturnPct >= 0 ? Colors.green : Colors.red,
+                        subtitle: "적정가까지 상승 여지",
                       ),
-                    ]),
-                    const SizedBox(height: 8),
-                    _sectionCard("수익성(Profitability)", [
-                      _metricTile(
-                        label: "ROE",
-                        value: "${result.roePct.toStringAsFixed(2)}%",
-                        helper: "EPS / BPS",
-                        icon: Icons.flash_on,
-                      ),
-                      _metricTile(
-                        label: "ROE / r",
-                        value: result.roeOverR.toStringAsFixed(2),
-                        helper: "1.0 이상이면 r 충족",
-                        icon: Icons.functions,
-                      ),
-                    ]),
-                    const SizedBox(height: 8),
-                    _sectionCard("배당(Dividend)", [
-                      _metricTile(
-                        label: "배당수익률",
-                        value: "${result.dividendYieldPct.toStringAsFixed(2)}%",
-                        helper: "DPS / 현재가",
-                        icon: Icons.savings,
-                      ),
-                    ]),
-                    const SizedBox(height: 8),
-                    _sectionCard("멀티플(Multiples)", [
-                      _metricTile(label: "PER", value: result.per.toStringAsFixed(2), icon: Icons.calculate),
-                      _metricTile(label: "PBR", value: result.pbr.toStringAsFixed(2), icon: Icons.assessment),
-                    ]),
+                    ),
                   ],
-                ],
+                ),
               ),
+
+              const SizedBox(height: 10),
+
+              // ✅ 게이지
+              _priceFairGauge(price: currentPrice, fairPrice: r.fairPrice),
+
+              const SizedBox(height: 10),
+
+              // ✅ 게이지 아래 문구(항상 보이게)
+              Text(
+                "현황평가: ${r.gapPct.toStringAsFixed(1)}%  (100% 미만이면 저평가 쪽)",
+                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                "※ 상단 눈 아이콘을 켜면 ROE, 배당수익률, PER/PBR 등 상세 지표를 볼 수 있어요.",
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+
+            // ✅ 고급 모드(기존 그대로)
+            if (_showAdvanced) ...[
+              _sectionCard("가치(Valuation)", [
+                _metricTile(
+                  label: "적정주가",
+                  value: _fmtMoney(r.fairPrice),
+                  helper: "BPS × (ROE / r)",
+                  icon: Icons.price_check,
+                ),
+                _metricTile(
+                  label: "현황평가(현재/적정)",
+                  value: "${r.gapPct.toStringAsFixed(1)}%",
+                  helper: "100% 미만이면 저평가 쪽",
+                  icon: Icons.bar_chart,
+                ),
+                _metricTile(
+                  label: "기대수익률",
+                  value:
+                      "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
+                  helper: "적정가까지 상승 여지",
+                  icon: Icons.trending_up,
+                ),
+              ]),
+              const SizedBox(height: 8),
+              _sectionCard("수익성(Profitability)", [
+                _metricTile(
+                  label: "ROE",
+                  value: "${r.roePct.toStringAsFixed(2)}%",
+                  helper: "EPS / BPS",
+                  icon: Icons.flash_on,
+                ),
+                _metricTile(
+                  label: "ROE / r",
+                  value: r.roeOverR.toStringAsFixed(2),
+                  helper: "1.0 이상이면 r 충족",
+                  icon: Icons.functions,
+                ),
+              ]),
+              const SizedBox(height: 8),
+              _sectionCard("배당(Dividend)", [
+                _metricTile(
+                  label: "배당수익률",
+                  value: "${r.dividendYieldPct.toStringAsFixed(2)}%",
+                  helper: "DPS / 현재가",
+                  icon: Icons.savings,
+                ),
+              ]),
+              const SizedBox(height: 8),
+              _sectionCard("멀티플(Multiples)", [
+                _metricTile(
+                    label: "PER",
+                    value: r.per.toStringAsFixed(2),
+                    icon: Icons.calculate),
+                _metricTile(
+                    label: "PBR",
+                    value: r.pbr.toStringAsFixed(2),
+                    icon: Icons.assessment),
+              ]),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1085,19 +1113,38 @@ class _ResultPageState extends State<ResultPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
-          const SizedBox(height: 6),
           Text(
-            value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: valueColor ?? Colors.black,
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: Colors.grey[700], fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+
+          // ✅ 값은 길면 자동 축소(한 줄 유지)
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: valueColor ?? Colors.black,
+              ),
             ),
           ),
+
           if (subtitle != null) ...[
-            const SizedBox(height: 6),
-            Text(subtitle, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Colors.grey[700], fontSize: 12),
+            ),
           ],
         ],
       ),
@@ -1106,11 +1153,22 @@ class _ResultPageState extends State<ResultPage> {
 
   Widget _priceFairGauge({required double price, required double fairPrice}) {
     if (price <= 0 || fairPrice <= 0) {
-      return const SizedBox.shrink();
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _cInfo.withAlpha(12),
+          border: Border.all(color: _cInfo.withAlpha(60)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+          "현재가/적정가를 표시하려면 현재가와 적정가가 필요해요.",
+          style: TextStyle(fontSize: 12),
+        ),
+      );
     }
 
     final mq = MediaQuery.of(context);
-    final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0);
+    final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0).toDouble();
 
     Widget clampScale(Widget child, {double max = 1.25}) {
       final cur = mq.textScaler.scale(1.0);
@@ -1124,12 +1182,10 @@ class _ResultPageState extends State<ResultPage> {
     final ratio = price / fairPrice;
     final pct = ratio * 100.0;
 
-    final clamped = ratio.clamp(0.0, 2.0);
+    final clamped = ratio.clamp(0.0, 2.0).toDouble();
     final fill = clamped / 2.0;
 
     final isUndervalued = ratio <= 1.0;
-
-    // 글자 크게 하면 아래 정보는 세로로 내려가는 게 안전
     final verticalInfo = ts >= 1.3;
 
     return Container(
@@ -1190,15 +1246,28 @@ class _ResultPageState extends State<ResultPage> {
 
           const SizedBox(height: 8),
 
-          // ✅ 0/100/200 라벨: Row(잘림) -> Wrap(자동 줄바꿈)
+          // ✅ 0 / 100 / 200: 좌/중/우 정렬 고정
           clampScale(
-            Wrap(
-              spacing: 12,
-              runSpacing: 4,
+            Row(
               children: const [
-                Text("0%", style: TextStyle(fontSize: 12)),
-                Text("100%(적정)", style: TextStyle(fontSize: 12)),
-                Text("200%", style: TextStyle(fontSize: 12)),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text("0%", style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: Text("100%(적정)", style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text("200%", style: TextStyle(fontSize: 12)),
+                  ),
+                ),
               ],
             ),
             max: 1.25,
@@ -1206,14 +1275,37 @@ class _ResultPageState extends State<ResultPage> {
 
           const SizedBox(height: 6),
 
-          // ✅ 현재가/적정가: Row(잘림) -> Wrap(자동 줄바꿈)
+          // ✅ 현재가/적정가: 좌/우 정렬 + 길면 축소
           clampScale(
-            Wrap(
-              spacing: 12,
-              runSpacing: 4,
+            Row(
               children: [
-                Text("현재가: ${_fmtMoney(price)}", style: const TextStyle(fontSize: 12)),
-                Text("적정가: ${_fmtMoney(fairPrice)}", style: const TextStyle(fontSize: 12)),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "현재가: ${_fmtMoney(price)}",
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        "적정가: ${_fmtMoney(fairPrice)}",
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
             max: verticalInfo ? 1.35 : 1.25,

@@ -196,7 +196,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
             const SizedBox(height: 6),
             Text(
               widget.market == Market.kr
-                  ? "출처: OpenDART 재무 + KIS 시세(별도 화면)"
+                  ? "출처: OpenDART 재무 + KIS 시세"
                   : "출처: FMP(제공 범위에 따라 값이 비어 있을 수 있음)",
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
