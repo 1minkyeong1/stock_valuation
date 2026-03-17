@@ -47,6 +47,10 @@ class UsFmpRepository implements StockRepository {
     return 0.0;
   }
 
+  double? _nullIfZero(double v) {
+    return v == 0.0 ? null : v;
+  }
+
   static int? _toYear(dynamic y) {
     final s = y?.toString().trim();
     if (s == null || s.isEmpty) return null;
@@ -75,12 +79,147 @@ class UsFmpRepository implements StockRepository {
     return '$year ${q}Q';
   }
 
+  static Map<String, dynamic>? _pickLatestUsIncomeRow(
+    List<Map<String, dynamic>> rows, {
+    int? targetYear,
+  }) {
+    if (rows.isEmpty) return null;
+
+    Iterable<Map<String, dynamic>> pool = rows;
+    if (targetYear != null) {
+      final filtered = rows.where((r) {
+        final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
+        return y == targetYear;
+      });
+      if (filtered.isNotEmpty) pool = filtered;
+    }
+
+    for (final r in pool) {
+      final revenue = _firstNumber(r, ['revenue', 'sales']);
+      final opIncome = _firstNumber(r, ['operatingIncome', 'operatingIncomeLoss']);
+      final netIncome = _firstNumber(r, ['netIncome', 'netIncomeLoss']);
+      if (revenue != 0.0 || opIncome != 0.0 || netIncome != 0.0) {
+        return r;
+      }
+    }
+
+    return pool.isNotEmpty ? pool.first : null;
+  }
+
+  static Map<String, dynamic>? _pickMatchingBsRow(
+    List<Map<String, dynamic>> rows,
+    Map<String, dynamic>? incomeRow,
+  ) {
+    if (rows.isEmpty) return null;
+    if (incomeRow == null) return rows.first;
+
+    final incomeDate = _toBasDt(
+      incomeRow['date'] ?? incomeRow['acceptedDate'] ?? incomeRow['filingDate'],
+    );
+
+    if (incomeDate != null) {
+      for (final r in rows) {
+        final bsDate = _toBasDt(
+          r['date'] ?? r['acceptedDate'] ?? r['filingDate'],
+        );
+        if (bsDate == incomeDate) return r;
+      }
+    }
+
+    final incomeYear = _toYear(
+      incomeRow['calendarYear'] ?? incomeRow['fiscalYear'] ?? incomeRow['year'],
+    );
+
+    if (incomeYear != null) {
+      for (final r in rows) {
+        final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
+        if (y == incomeYear) return r;
+      }
+    }
+
+    return rows.first;
+  }
+
+  static String _makeUsPeriodLabel({
+    required bool usedQuarter,
+    required String? basDt,
+    required int? year,
+  }) {
+    if (usedQuarter) {
+      return _quarterLabelFromBasDt(basDt, year) ?? (year != null ? '$year 분기' : '분기');
+    }
+    return year != null ? '$year FY' : 'FY';
+  }
+
   static bool _isHttp402(Object e) => e.toString().contains('HTTP 402');
   static bool _isHttp429(Object e) => e.toString().contains('HTTP 429');
 
   static bool _isLegacyMsg(Object e) =>
       e.toString().toLowerCase().contains('legacy endpoint') ||
       e.toString().toLowerCase().contains('no longer supported');
+
+  // 장기지표 안정적 헬퍼
+  int? _extractYearFromDate(dynamic raw) {
+    if (raw == null) return null;
+    final s = raw.toString().trim();
+    if (s.length >= 4) {
+      return int.tryParse(s.substring(0, 4));
+    }
+    return null;
+  }
+
+  double? _pickNullableNumber(Map<String, dynamic> row, List<String> keys) {
+    for (final key in keys) {
+      if (!row.containsKey(key)) continue;
+
+      final v = row[key];
+      if (v == null) continue;
+      if (v is num) return v.toDouble();
+
+      final s = v.toString().trim().replaceAll(',', '');
+      if (s.isEmpty) continue;
+
+      final parsed = double.tryParse(s);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
+  double? _calcAnnualEpsFromIncomeRow(Map<String, dynamic> row) {
+    final direct = _pickNullableNumber(row, [
+      'epsdiluted',
+      'epsDiluted',
+      'eps',
+      'reportedEPS',
+    ]);
+    if (direct != null) return direct;
+
+    final netIncome = _pickNullableNumber(row, [
+      'netIncome',
+      'netIncomeLoss',
+    ]);
+    final shares = _pickNullableNumber(row, [
+      'weightedAverageShsOutDil',
+      'weightedAverageShsOut',
+    ]);
+
+    if (netIncome == null || shares == null || shares == 0) return null;
+    return netIncome / shares;
+  }
+
+  double? _calcRoePct({
+    required double? netIncome,
+    required double? equity,
+  }) {
+    if (netIncome == null || equity == null || equity == 0) return null;
+    return (netIncome / equity) * 100.0;
+  }
+
+  double? _avgDoubles(Iterable<double> values) {
+    final list = values.where((e) => e.isFinite).toList();
+    if (list.isEmpty) return null;
+    return list.reduce((a, b) => a + b) / list.length;
+  }
 
   // -------------------------
   // StockRepository
@@ -109,19 +248,43 @@ class UsFmpRepository implements StockRepository {
       final name = (m['name'] ?? m['companyName'] ?? code).toString().trim();
       final market = _pickMarket(m);
 
-      items.add(StockSearchItem(code: code, name: name, market: market));
+      final rawLogo = (m['logoUrl'] ?? m['logo'] ?? m['image'] ?? '')
+          .toString()
+          .trim();
+
+      items.add(
+        StockSearchItem(
+          code: code,
+          name: name,
+          market: market,
+          logoUrl: rawLogo.isEmpty ? null : rawLogo,
+        ),
+      );
+
       if (items.length >= 30) break;
     }
 
     // ✅ alias로는 잡혔는데 FMP 검색이 비어있으면 UX fallback
     if (items.isEmpty && hit != null) {
-      return [StockSearchItem(code: hit.code, name: hit.name, market: 'US')];
+      return [
+        StockSearchItem(
+          code: hit.code,
+          name: hit.name,
+          market: 'US',
+        ),
+      ];
     }
 
     // ✅ 티커처럼 입력했는데 결과가 없으면 fallback
     if (items.isEmpty && SearchAlias.looksLikeUsTicker(raw)) {
       final t = raw.toUpperCase();
-      return [StockSearchItem(code: t, name: t, market: 'US')];
+      return [
+        StockSearchItem(
+          code: t,
+          name: t,
+          market: 'US',
+        ),
+      ];
     }
 
     return items;
@@ -211,6 +374,228 @@ class UsFmpRepository implements StockRepository {
     return fut;
   }
 
+  @override
+  Future<StockFinancialDetails> getFinancialDetails(String code, {int? targetYear}) async {
+    final symbol = code.trim().toUpperCase();
+    final bool dbg = kDebugMode;
+
+    if (symbol.isEmpty) {
+      return StockFinancialDetails(
+        current: const StockFundamentals(eps: 0, bps: 0, dps: 0),
+        lossYears: const [],
+        debtRatio: null,
+        hasDividend: null,
+      );
+    }
+
+    // 현재 계산값은 기존 로직 재사용
+    final current = await getFundamentals(symbol, targetYear: targetYear);
+
+    try {
+      final qIncomeF = _fmp.incomeStatement(
+        symbol: symbol,
+        limit: 8,
+        period: 'quarter',
+      );
+      final aIncomeF = _fmp.incomeStatement(
+        symbol: symbol,
+        limit: 6,
+        period: 'annual',
+      );
+
+      final qBsF = _fmp.balanceSheet(
+        symbol: symbol,
+        limit: 8,
+        period: 'quarter',
+      );
+      final aBsF = _fmp.balanceSheet(
+        symbol: symbol,
+        limit: 6,
+        period: 'annual',
+      );
+
+      final results = await Future.wait([
+        qIncomeF,
+        aIncomeF,
+        qBsF,
+        aBsF,
+      ]).timeout(const Duration(seconds: 10));
+
+      final qIncomeList = _unwrapList(results[0]);
+      final aIncomeList = _unwrapList(results[1]);
+      final qBsList = _unwrapList(results[2]);
+      final aBsList = _unwrapList(results[3]);
+
+      if (dbg) {
+        debugPrint(
+          '[FMP] getFinancialDetails symbol=$symbol '
+          'qIncome=${qIncomeList.length} aIncome=${aIncomeList.length} '
+          'qBs=${qBsList.length} aBs=${aBsList.length}',
+        );
+      }
+
+      final latestQuarterIncome = _pickLatestUsIncomeRow(
+        qIncomeList,
+        targetYear: targetYear,
+      );
+      final latestAnnualIncome = _pickLatestUsIncomeRow(
+        aIncomeList,
+        targetYear: targetYear,
+      );
+
+      final bool usedQuarter = latestQuarterIncome != null;
+      final latestIncome = latestQuarterIncome ?? latestAnnualIncome;
+
+      final latestBs = usedQuarter
+          ? _pickMatchingBsRow(qBsList, latestIncome)
+          : _pickMatchingBsRow(aBsList, latestIncome);
+
+      final revenue = latestIncome == null
+          ? null
+          : _nullIfZero(_firstNumber(latestIncome, ['revenue', 'sales']));
+
+      final opIncome = latestIncome == null
+          ? null
+          : _nullIfZero(_firstNumber(latestIncome, [
+              'operatingIncome',
+              'operatingIncomeLoss',
+            ]));
+
+      final netIncome = latestIncome == null
+          ? null
+          : _nullIfZero(_firstNumber(latestIncome, [
+              'netIncome',
+              'netIncomeLoss',
+            ]));
+
+      double assets = 0.0;
+      double liab = 0.0;
+      double equity = 0.0;
+
+      if (latestBs != null) {
+        assets = _firstNumber(latestBs, ['totalAssets']);
+        liab = _firstNumber(latestBs, ['totalLiabilities']);
+
+        equity = _firstNumber(latestBs, [
+          'totalStockholdersEquity',
+          'totalEquity',
+          'totalShareholdersEquity',
+          'totalAssetsMinusTotalLiabilities',
+        ]);
+      }
+
+      final equity2 = (equity != 0.0)
+          ? equity
+          : ((assets != 0.0 || liab != 0.0) ? (assets - liab) : 0.0);
+
+      // ===== 장기 검증 지표 계산 =====
+      final epsHistory = <YearMetric>[];
+      final roeHistory = <YearMetric>[];
+      final lossYearsSet = <int>{};
+
+      for (final incomeRow in aIncomeList.map((e) => Map<String, dynamic>.from(e))) {
+        final year = _extractYearFromDate(incomeRow['date']);
+        if (year == null) continue;
+
+        if (targetYear != null && year > targetYear) {
+          continue;
+        }
+
+        final eps = _calcAnnualEpsFromIncomeRow(incomeRow);
+        final annualNetIncome = _pickNullableNumber(incomeRow, [
+          'netIncome',
+          'netIncomeLoss',
+        ]);
+
+        if (eps != null) {
+          epsHistory.add(YearMetric(year: year, value: eps));
+          if (eps <= 0) {
+            lossYearsSet.add(year);
+          }
+        } else if (annualNetIncome != null && annualNetIncome < 0) {
+          lossYearsSet.add(year);
+        }
+
+        final bsRow = _pickMatchingBsRow(aBsList, incomeRow);
+        if (bsRow != null) {
+          double? annualEquity = _pickNullableNumber(bsRow, [
+            'totalStockholdersEquity',
+            'totalEquity',
+            'totalShareholdersEquity',
+            'totalAssetsMinusTotalLiabilities',
+          ]);
+
+          if (annualEquity == null || annualEquity == 0) {
+            final annualAssets = _pickNullableNumber(bsRow, ['totalAssets']);
+            final annualLiab = _pickNullableNumber(bsRow, ['totalLiabilities']);
+            if (annualAssets != null || annualLiab != null) {
+              annualEquity = (annualAssets ?? 0) - (annualLiab ?? 0);
+            }
+          }
+
+          final roe = _calcRoePct(
+            netIncome: annualNetIncome,
+            equity: annualEquity,
+          );
+
+          if (roe != null) {
+            roeHistory.add(YearMetric(year: year, value: roe));
+          }
+        }
+      }
+
+      epsHistory.sort((a, b) => b.year.compareTo(a.year));
+      roeHistory.sort((a, b) => b.year.compareTo(a.year));
+
+      final epsAvg3y = _avgDoubles(
+        epsHistory.take(3).map((e) => e.value),
+      );
+
+      final roeAvg5y = _avgDoubles(
+        roeHistory.take(5).map((e) => e.value),
+      );
+
+      final debtRatio = (liab != 0.0 && equity2 != 0.0)
+          ? (liab / equity2) * 100.0
+          : null;
+
+      return StockFinancialDetails(
+        current: current,
+        revenue: revenue,
+        opIncome: opIncome,
+        netIncome: netIncome,
+        equity: _nullIfZero(equity2),
+        liabilities: _nullIfZero(liab),
+        epsAvg3y: epsAvg3y,
+        roeAvg5y: roeAvg5y,
+        epsHistory: epsHistory,
+        roeHistory: roeHistory,
+        lossYears: lossYearsSet.toList()..sort((a, b) => b.compareTo(a)),
+        debtRatio: debtRatio,
+        hasDividend: current.dps > 0,
+      );
+    } on TimeoutException {
+      if (dbg) debugPrint('[FMP] getFinancialDetails TIMEOUT symbol=$symbol');
+      return StockFinancialDetails(
+        current: current,
+        lossYears: const [],
+        debtRatio: null,
+        hasDividend: current.dps > 0,
+      );
+    } catch (e, st) {
+      if (dbg) {
+        debugPrint('[FMP] getFinancialDetails ERROR symbol=$symbol: $e');
+        debugPrint('$st');
+      }
+      return StockFinancialDetails(
+        current: current,
+        lossYears: const [],
+        debtRatio: null,
+        hasDividend: current.dps > 0,
+      );
+    }
+  }
+
   List<Map<String, dynamic>> _unwrapList(dynamic v) {
     // 1) 응답이 곧바로 List
     if (v is List) {
@@ -266,96 +651,133 @@ class UsFmpRepository implements StockRepository {
           epsSource: reason,
           bpsSource: reason,
           dpsSource: reason,
+          fsSource: reason,
         );
 
     try {
       double pickBpsFromWorker(Map<String, dynamic> br) {
-            // flat: {bps: ...}
-            final direct = _asDouble(br['bps']);
-            if (direct != 0.0) return direct;
+        final direct = _asDouble(br['bps']);
+        if (direct != 0.0) return direct;
 
-            // wrapped: {items:[{bps: ...}]}
-            final items = br['items'];
-            if (items is List && items.isNotEmpty && items.first is Map) {
-              return _asDouble((items.first as Map)['bps']);
-            }
-            return 0.0;
-          }
+        final items = br['items'];
+        if (items is List && items.isNotEmpty && items.first is Map) {
+          return _asDouble((items.first as Map)['bps']);
+        }
+        return 0.0;
+      }
 
-      // 병렬 호출
-      final incomeF = _fmp.incomeStatement(symbol: symbol, limit: 12);
-      final bsF = _fmp.balanceSheet(symbol: symbol, limit: 1);
+      // ✅ 분기 + 연간 둘 다 가져와서 fallback
+      final qIncomeF = _fmp.incomeStatement(
+        symbol: symbol,
+        limit: 8,
+        period: 'quarter',
+      );
+      final aIncomeF = _fmp.incomeStatement(
+        symbol: symbol,
+        limit: 4,
+        period: 'annual',
+      );
+
+      final qBsF = _fmp.balanceSheet(
+        symbol: symbol,
+        limit: 8,
+        period: 'quarter',
+      );
+      final aBsF = _fmp.balanceSheet(
+        symbol: symbol,
+        limit: 4,
+        period: 'annual',
+      );
+
       final profF = _fmp.profileOne(symbol);
       final divF = _fmp.dividends(symbol: symbol, limit: 20);
 
-      final results = await Future.wait([incomeF, bsF, profF, divF]).timeout(const Duration(seconds: 10));
+      final results = await Future.wait([
+        qIncomeF,
+        aIncomeF,
+        qBsF,
+        aBsF,
+        profF,
+        divF,
+      ]).timeout(const Duration(seconds: 10));
 
-      final incomeList = _unwrapList(results[0]);
-      final bsList = _unwrapList(results[1]);
-      final prof = _unwrapOne(results[2]);
-      final divs = _unwrapList(results[3]);
+      final qIncomeList = _unwrapList(results[0]);
+      final aIncomeList = _unwrapList(results[1]);
+      final qBsList = _unwrapList(results[2]);
+      final aBsList = _unwrapList(results[3]);
+      final prof = _unwrapOne(results[4]);
+      final divs = _unwrapList(results[5]);
 
       if (dbg) {
-        debugPrint('[FMP] income len=${incomeList.length} bs len=${bsList.length} div len=${divs.length}');
+        debugPrint(
+          '[FMP] qIncome=${qIncomeList.length} aIncome=${aIncomeList.length} '
+          'qBs=${qBsList.length} aBs=${aBsList.length} div=${divs.length}',
+        );
       }
 
-      // 사용할 최신 row 선택
-      Map<String, dynamic>? latestIncome;
-      if (incomeList.isNotEmpty) {
-        if (targetYear == null) {
-          latestIncome = incomeList.first;
-        } else {
-          Map<String, dynamic>? picked;
-          for (final r in incomeList) {
-            final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
-            if (y == targetYear) {
-              picked = r;
-              break;
-            }
-          }
-          latestIncome = picked ?? incomeList.first;
-        }
-      }
+      final latestQuarterIncome = _pickLatestUsIncomeRow(
+        qIncomeList,
+        targetYear: targetYear,
+      );
+      final latestAnnualIncome = _pickLatestUsIncomeRow(
+        aIncomeList,
+        targetYear: targetYear,
+      );
 
-      final year = _toYear(latestIncome?['calendarYear'] ?? latestIncome?['fiscalYear'] ?? latestIncome?['year']);
+      final bool usedQuarter = latestQuarterIncome != null;
+      final latestIncome = latestQuarterIncome ?? latestAnnualIncome;
+
+      final latestBs = usedQuarter
+          ? _pickMatchingBsRow(qBsList, latestIncome)
+          : _pickMatchingBsRow(aBsList, latestIncome);
+
+      final year = _toYear(
+        latestIncome?['calendarYear'] ?? latestIncome?['fiscalYear'] ?? latestIncome?['year'],
+      );
 
       final incomeBasDt = _toBasDt(
         latestIncome?['date'] ?? latestIncome?['acceptedDate'] ?? latestIncome?['filingDate'],
       );
 
-      final periodLabel = _quarterLabelFromBasDt(incomeBasDt, year) ?? (year != null ? '$year' : 'TTM');
+      final periodLabel = _makeUsPeriodLabel(
+        usedQuarter: usedQuarter,
+        basDt: incomeBasDt,
+        year: year,
+      );
 
-      // EPS(TTM) 근사: 4개 합
+      // ✅ EPS(TTM): 최신 분기 4개 합 우선, 없으면 annual 첫 row 사용
       double epsTtm = 0.0;
-      List<Map<String, dynamic>> epsRows = incomeList;
+      if (qIncomeList.isNotEmpty) {
+        List<Map<String, dynamic>> epsRows = qIncomeList;
+        if (targetYear != null) {
+          final filtered = qIncomeList.where((r) {
+            final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
+            return y == targetYear || y == targetYear - 1;
+          }).toList();
+          if (filtered.isNotEmpty) epsRows = filtered;
+        }
 
-      if (targetYear != null) {
-        final filtered = incomeList.where((r) {
-          final y = _toYear(r['calendarYear'] ?? r['fiscalYear'] ?? r['year']);
-          return y == targetYear || y == targetYear - 1;
-        }).toList();
-        if (filtered.isNotEmpty) epsRows = filtered;
+        for (final r in epsRows.take(4)) {
+          epsTtm += _firstNumber(r, ['eps', 'epsDiluted', 'epsdiluted']);
+        }
+      } else if (latestAnnualIncome != null) {
+        epsTtm = _firstNumber(latestAnnualIncome, ['eps', 'epsDiluted', 'epsdiluted']);
       }
 
-      for (final r in epsRows.take(4)) {
-        epsTtm += _firstNumber(r, ['eps', 'epsDiluted', 'epsdiluted']);
-      }
-
-
-     // ✅ BPS = equity / shares (안전 + equity2 반영)
+      // ✅ BPS = equity / shares
       double assets = 0.0;
       double liab = 0.0;
       double equity = 0.0;
 
-      if (bsList.isNotEmpty) {
-        assets = _firstNumber(bsList.first, ['totalAssets']);
-        liab   = _firstNumber(bsList.first, ['totalLiabilities']);
+      if (latestBs != null) {
+        assets = _firstNumber(latestBs, ['totalAssets']);
+        liab = _firstNumber(latestBs, ['totalLiabilities']);
 
-        equity = _firstNumber(bsList.first, [
+        equity = _firstNumber(latestBs, [
           'totalStockholdersEquity',
           'totalEquity',
           'totalShareholdersEquity',
-          'totalAssetsMinusTotalLiabilities', // (있으면 사용)
+          'totalAssetsMinusTotalLiabilities',
         ]);
       }
 
@@ -363,16 +785,16 @@ class UsFmpRepository implements StockRepository {
           ? equity
           : ((assets != 0.0 || liab != 0.0) ? (assets - liab) : 0.0);
 
-      // shares는 profile만 보지 말고, BS에도 있으면 먼저 사용
       double shares = 0.0;
 
-      if (bsList.isNotEmpty) {
-        shares = _firstNumber(bsList.first, [
+      if (latestBs != null) {
+        shares = _firstNumber(latestBs, [
           'commonStockSharesOutstanding',
           'sharesOutstanding',
           'shares',
         ]);
       }
+
       if (shares == 0.0 && prof != null) {
         shares = _firstNumber(prof, [
           'sharesOutstanding',
@@ -392,7 +814,7 @@ class UsFmpRepository implements StockRepository {
       double bps = (equity2 != 0.0 && shares != 0.0) ? (equity2 / shares) : 0.0;
 
       String bpsSource = 'balance-sheet(equity2/shares)';
-      String bpsLabel  = (equity != 0.0)
+      String bpsLabel = (equity != 0.0)
           ? 'BS (equity/shares)'
           : ((assets != 0.0 || liab != 0.0) ? 'BS (assets-liab)/shares' : 'BS (no equity)');
 
@@ -406,19 +828,19 @@ class UsFmpRepository implements StockRepository {
               bps = bps2;
               final src = (br['source'] ?? 'unknown').toString();
               bpsSource = 'worker:/fmp/bps($src)';
-              bpsLabel  = 'BPS fallback ($src)';
+              bpsLabel = 'BPS fallback ($src)';
             } else {
-              bpsLabel  = 'BPS 없음';
+              bpsLabel = 'BPS 없음';
               bpsSource = 'worker:/fmp/bps(no_value)';
             }
           } else {
             final err = (br['error'] ?? 'unknown').toString();
-            bpsLabel  = 'BPS 실패($err)';
+            bpsLabel = 'BPS 실패($err)';
             bpsSource = 'worker:/fmp/bps(fail)';
           }
         } catch (e) {
           if (dbg) debugPrint('[FMP] bps fallback error: $e');
-          bpsLabel  = 'BPS 실패';
+          bpsLabel = 'BPS 실패';
           bpsSource = 'worker:/fmp/bps(error)';
         }
       }
@@ -431,7 +853,9 @@ class UsFmpRepository implements StockRepository {
         }
       }
 
-      final epsSource = 'income-statement(sum4)';
+      final epsSource = qIncomeList.isNotEmpty
+          ? 'income-statement(quarter,sum4)'
+          : 'income-statement(annual)';
       final dpsSource = 'dividends(sum8)';
 
       final epsLabel = (incomeBasDt != null) ? 'TTM (as of $incomeBasDt)' : 'TTM';
@@ -450,6 +874,9 @@ class UsFmpRepository implements StockRepository {
         epsSource: epsSource,
         bpsSource: bpsSource,
         dpsSource: dpsSource,
+        fsSource: usedQuarter
+            ? 'FMP quarter income-statement + balance-sheet ($incomeBasDt)'
+            : 'FMP annual income-statement + balance-sheet',
       );
     } on TimeoutException {
       if (dbg) debugPrint('[FMP] getFundamentals TIMEOUT');

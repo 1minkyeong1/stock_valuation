@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'stock_repository.dart';
-import '../api/dart_proxy_client.dart';
+//import '../api/dart_proxy_client.dart';
 import '../../utils/search_alias.dart';
 
 /// KIS(실시간 가격) + OpenDART(재무/배당)를 Worker를 통해 호출하는 Repository
@@ -89,20 +89,45 @@ class KisKrStockRepository implements StockRepository {
     return double.tryParse(s) ?? 0.0;
   }
 
-  // DART 숫자(원단위) 파서: num
-  num _toNum(dynamic v) {
-    final s0 = (v ?? '').toString().trim();
-    if (s0.isEmpty || s0 == '-') return 0;
-    var s = s0.replaceAll(',', '').trim();
+  double? _toNullableDouble(dynamic v) {
+  if (v == null) return null;
+  if (v is num) return v.toDouble();
 
-    // (123) => -123
-    if (s.startsWith('(') && s.endsWith(')')) {
-      s = '-${s.substring(1, s.length - 1)}';
-    }
+  final s = v.toString().trim();
+  if (s.isEmpty) return null;
 
-    s = s.replaceAll(RegExp(r'[^0-9\-]'), '');
-    return num.tryParse(s) ?? 0;
-  }
+  return double.tryParse(s);
+}
+
+List<YearMetric> _parseYearMetrics(dynamic raw) {
+  if (raw is! List) return const [];
+
+  return raw
+      .map((e) {
+        if (e is! Map) return null;
+
+        final m = e.cast<String, dynamic>();
+        final y = m['year'];
+        final v = m['value'];
+
+        final year = y is num ? y.toInt() : int.tryParse('$y');
+        final value = v is num ? v.toDouble() : double.tryParse('$v');
+
+        if (year == null || value == null) return null;
+        return YearMetric(year: year, value: value);
+      })
+      .whereType<YearMetric>()
+      .toList();
+}
+
+List<int> _parseIntList(dynamic raw) {
+  if (raw is! List) return const [];
+
+  return raw
+      .map((e) => e is num ? e.toInt() : int.tryParse('$e'))
+      .whereType<int>()
+      .toList();
+}
 
   // =========================
   // 1) 검색 (Worker: /kr/search)
@@ -134,18 +159,28 @@ class KisKrStockRepository implements StockRepository {
     final list = (root['items'] is List) ? (root['items'] as List) : const [];
 
     final items = list
-        .whereType<Map>()
-        .map((m) {
-          final mm = Map<String, dynamic>.from(m);
-          final code = (mm['symbol'] ?? mm['code'] ?? '').toString().trim();
-          final name = (mm['nameKo'] ?? mm['name'] ?? '').toString().trim();
-          final market = (mm['exchangeShortName'] ?? mm['market'] ?? 'KRX')
-              .toString()
-              .trim();
-          return StockSearchItem(code: code, name: name, market: market);
-        })
-        .where((x) => x.code.isNotEmpty && x.name.isNotEmpty)
-        .toList();
+      .whereType<Map>()
+      .map((m) {
+        final mm = Map<String, dynamic>.from(m);
+        final code = (mm['symbol'] ?? mm['code'] ?? '').toString().trim();
+        final name = (mm['nameKo'] ?? mm['name'] ?? '').toString().trim();
+        final market = (mm['exchangeShortName'] ?? mm['market'] ?? 'KRX')
+            .toString()
+            .trim();
+
+        final rawLogo = (mm['logoUrl'] ?? mm['logo'] ?? mm['image'] ?? '')
+            .toString()
+            .trim();
+
+        return StockSearchItem(
+          code: code,
+          name: name,
+          market: market,
+          logoUrl: rawLogo.isEmpty ? null : rawLogo,
+        );
+      })
+      .where((x) => x.code.isNotEmpty && x.name.isNotEmpty)
+      .toList();
 
     // Worker 결과가 비어도 alias가 있으면 1개라도 보여주기
     if (items.isEmpty && hit != null) {
@@ -202,414 +237,180 @@ class KisKrStockRepository implements StockRepository {
   // 3) 재무 (Worker: /dart/corp + /dart/fnltt + /dart/alot)
   // =========================
   @override
-  Future<StockFundamentals> getFundamentals(String code,
-      {int? targetYear}) async {
+  Future<StockFundamentals> getFundamentals(String code, {int? targetYear}) async {
     final c = _normalizeCode(code);
     if (c.isEmpty) throw Exception('code is empty');
 
-    final dart = DartProxyClient(
-      workerBaseUrl: workerBaseUrl,
-      client: _client,
-      debugLog: debugLog,
+    final qs = <String, String>{
+      'code': c,
+      'reprt_code': '11011',
+      'fs_div': 'CFS',
+    };
+
+    if (targetYear != null) {
+      qs['bsns_year'] = '$targetYear';
+    }
+
+    final res = await _workerGet(
+      '/kr/metrics-lite',
+      qs,
+      tag: 'kr/metrics-lite',
     );
 
-    // 1) corp_code
-    final corpCode = await dart.getCorpCodeByStockCode(c);
-    if (corpCode == null || corpCode.isEmpty) {
-      throw Exception('corp_code를 찾지 못했습니다: stock=$c');
-    }
-    _logDart('corp_code: stock=$c -> corp=$corpCode');
-
-    // 2) shares (EPS/BPS 계산용)
-    int shares = 0;
-    try {
-      final pq = await getPriceQuote(c);
-      shares = pq.listedShares;
-
-      if (shares <= 0 && pq.marketCap > 0 && pq.price > 0) {
-        shares = (pq.marketCap / pq.price).round();
-      }
-
-      _logDart(
-          'shares: listedShares=${pq.listedShares} marketCap=${pq.marketCap} price=${pq.price} -> shares=$shares');
-    } catch (e) {
-      _logDart('getPriceQuote for shares failed: $e');
+    if (res.statusCode != 200) {
+      throw Exception('KR metrics-lite HTTP ${res.statusCode}: ${res.body}');
     }
 
-    // 3) 후보 연도/보고서
-    final now = DateTime.now();
-    final baseYear = targetYear ?? (now.year - 1);
-    final years = <int>[baseYear, baseYear - 1, baseYear - 2];
-
-    // 3Q 우선 → 연간(FY) 폴백
-    const reprtOrder = <String>['11014', '11011'];
-
-    // 결과값
-    double eps = 0.0;
-    double bps = 0.0;
-    double dps = 0.0;
-
-    // 메타
-    int? usedYear;
-    String? usedReprt;
-    String? usedFsDiv; // "CFS" / "OFS"
-    String? basDt;
-    String? periodLabel;
-
-    // 원본 재무 금액(신뢰 표시용)
-    num revenue = 0;
-    num opIncome = 0;
-    num netIncome = 0;
-    num equity = 0;
-
-    // 4) fnltt rows (CFS 우선, 없으면 OFS)
-    List<Map<String, dynamic>>? fnlttRows;
-
-    for (final y in years) {
-      for (final reprt in reprtOrder) {
-        // CFS
-        debugPrint('fnltt call corp=$corpCode year=$y reprt=$reprt fs=CFS');
-        final cfs = await dart.fnlttSinglAcntAll(
-          corpCode: corpCode,
-          year: y,
-          reprtCode: reprt,
-          fsDiv: 'CFS',
-        );
-        if (cfs.isNotEmpty) {
-          fnlttRows = cfs;
-          usedYear = y;
-          usedReprt = reprt;
-          usedFsDiv = 'CFS';
-          break;
-        }
-
-        // OFS
-        debugPrint('fnltt call corp=$corpCode year=$y reprt=$reprt fs=OFS');
-        final ofs = await dart.fnlttSinglAcntAll(
-          corpCode: corpCode,
-          year: y,
-          reprtCode: reprt,
-          fsDiv: 'OFS',
-        );
-        if (ofs.isNotEmpty) {
-          fnlttRows = ofs;
-          usedYear = y;
-          usedReprt = reprt;
-          usedFsDiv = 'OFS';
-          break;
-        }
-      }
-      if (fnlttRows != null) break;
+    final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    if (map['ok'] != true) {
+      throw Exception('KR metrics-lite failed: ${res.body}');
     }
 
-    if (fnlttRows != null && fnlttRows.isNotEmpty) {
-      // ✅ 원본 금액 추출
-      netIncome = _pickNetIncomeFromDart(fnlttRows);
-      equity = _pickEquityFromDart(fnlttRows);
-      revenue = _pickRevenueFromDart(fnlttRows);
-      opIncome = _pickOpIncomeFromDart(fnlttRows);
+    final fiscal = (map['fiscal'] as Map?)?.cast<String, dynamic>();
 
-      // ✅ EPS/BPS 계산
-      final annualizedNetIncome =
-          _annualizeProfit(netIncome.toDouble(), usedReprt ?? '11011');
+    final yearStr = fiscal?['bsns_year']?.toString();
+    final reprtCode = fiscal?['reprt_code']?.toString();
+    final fiscalBasDt = fiscal?['basDt']?.toString();
+    final fsDivUsed =
+        fiscal?['fs_div_used']?.toString() ?? map['fs_div_used']?.toString();
 
-      if (shares > 0) {
-        eps = (annualizedNetIncome != 0) ? (annualizedNetIncome / shares) : 0.0;
-        bps = (equity != 0) ? (equity.toDouble() / shares) : 0.0;
-      } else {
-        _logDart('shares=0 so eps/bps cannot be calculated');
-      }
+    final year = int.tryParse(yearStr ?? '');
 
-      // 메타(기준일/라벨)
-      if (usedYear != null && usedReprt != null) {
-        final info = _reprtInfo(usedYear, usedReprt);
-        basDt = info.basDt;
-        periodLabel = info.label;
-      }
+    final labelSuffix = _reprtLabelFromCode(reprtCode);
+    final periodLabel =
+        (yearStr != null && labelSuffix.isNotEmpty) ? '$yearStr $labelSuffix' : null;
 
-      _logDart(
-        'fnltt picked: year=$usedYear reprt=$usedReprt fs=$usedFsDiv '
-        'revenue=$revenue opIncome=$opIncome netIncome=$netIncome equity=$equity shares=$shares '
-        '-> eps=$eps bps=$bps basDt=$basDt label=$periodLabel',
-      );
-    } else {
-      _logDart('fnlttRows empty for corp=$corpCode stock=$c (years=$years)');
-    }
-
-    // 5) DPS (배당)
-    final tryYear = usedYear ?? baseYear;
-    final tryReprt = usedReprt ?? '11011';
-
-    dps = await _tryFetchDps(
-      dart: dart,
-      corpCode: corpCode,
-      year: tryYear,
-      reprtCode: tryReprt,
-    );
-
-    // DPS가 0이면 보고서코드만 바꿔서 추가 시도
-    if (dps == 0.0) {
-      for (final rc in reprtOrder) {
-        if (rc == tryReprt) continue;
-        dps = await _tryFetchDps(
-          dart: dart,
-          corpCode: corpCode,
-          year: tryYear,
-          reprtCode: rc,
-        );
-        if (dps != 0.0) break;
-      }
-    }
+    final eps = _toDouble(map['eps']);
+    final bps = _toDouble(map['bps']);
+    final dps = _toDouble(map['dps']);
 
     _logDart(
-      'final fundamentals: eps=$eps bps=$bps dps=$dps '
-      'year=$usedYear reprt=$usedReprt fs=$usedFsDiv basDt=$basDt label=$periodLabel '
-      'revenue=$revenue opIncome=$opIncome netIncome=$netIncome equity=$equity shares=$shares',
+      'KR metrics-lite parsed: '
+      'eps=$eps bps=$bps dps=$dps year=$year reprt=$reprtCode fs=$fsDivUsed '
+      'basDt=$fiscalBasDt label=$periodLabel',
     );
 
     return StockFundamentals(
       eps: eps,
       bps: bps,
       dps: dps,
-      year: usedYear ?? targetYear ?? baseYear,
-      basDt: basDt,
+      year: year,
+      basDt: fiscalBasDt,
       periodLabel: periodLabel,
+      reprtCode: reprtCode,
+      fsDiv: fsDivUsed,
+      fsSource: 'Worker /kr/metrics-lite',
+      epsSource: 'Worker /kr/metrics-lite',
+      bpsSource: 'Worker /kr/metrics-lite',
+      dpsSource: 'Worker /kr/metrics-lite',
+    );
+  }
 
-      // ✅ 재무제표 원본 금액(사용자 신뢰용 표시)
-      revenue: (revenue > 0) ? revenue : null,
-      opIncome: (opIncome != 0) ? opIncome : null, // 적자(음수) 유지
-      netIncome: (netIncome != 0) ? netIncome : null, // 적자(음수) 유지
-      equity: (equity != 0) ? equity : null,
+  @override
+  Future<StockFinancialDetails> getFinancialDetails(String code, {int? targetYear}) async {
+    final c = _normalizeCode(code);
+    if (c.isEmpty) throw Exception('code is empty');
 
-      // ✅ 어떤 조합으로 가져왔는지
-      fsDiv: usedFsDiv,
-      reprtCode: usedReprt,
-      fsSource: 'OpenDART fnlttSinglAcntAll',
+    final qs = <String, String>{
+      'code': c,
+      'reprt_code': '11011',
+      'fs_div': 'CFS',
+    };
+
+    if (targetYear != null) {
+      qs['bsns_year'] = '$targetYear';
+    }
+
+    final res = await _workerGet(
+      '/kr/financial-details',
+      qs,
+      tag: 'kr/financial-details',
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('KR financial-details HTTP ${res.statusCode}: ${res.body}');
+    }
+
+    final map = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    if (map['ok'] != true) {
+      throw Exception('KR financial-details failed: ${res.body}');
+    }
+
+    final currentMap =
+        (map['current'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+
+    final current = StockFundamentals(
+      eps: _toDouble(currentMap['eps']),
+      bps: _toDouble(currentMap['bps']),
+      dps: _toDouble(currentMap['dps']),
+      year: currentMap['year'] is num
+          ? (currentMap['year'] as num).toInt()
+          : int.tryParse('${currentMap['year'] ?? ''}'),
+      basDt: currentMap['basDt']?.toString(),
+      periodLabel: currentMap['periodLabel']?.toString(),
+
+      epsLabel: currentMap['epsLabel']?.toString(),
+      bpsLabel: currentMap['bpsLabel']?.toString(),
+      dpsLabel: currentMap['dpsLabel']?.toString(),
+
+      epsSource: currentMap['epsSource']?.toString(),
+      bpsSource: currentMap['bpsSource']?.toString(),
+      dpsSource: currentMap['dpsSource']?.toString(),
+      fsDiv: currentMap['fsDiv']?.toString(),
+      reprtCode: currentMap['reprtCode']?.toString(),
+      fsSource: currentMap['fsSource']?.toString(),
+    );
+
+    final summary =
+        (map['summary'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+
+    final analysis =
+        (map['analysis'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+
+    num? asNumOrNull(dynamic v) {
+      if (v == null) return null;
+      if (v is num) return v;
+      final s = v.toString().trim();
+      if (s.isEmpty) return null;
+      return num.tryParse(s);
+    }
+
+    return StockFinancialDetails(
+      current: current,
+      revenue: asNumOrNull(summary['revenue']),
+      opIncome: asNumOrNull(summary['opIncome']),
+      netIncome: asNumOrNull(summary['netIncome']),
+      equity: asNumOrNull(summary['equity']),
+      liabilities: asNumOrNull(summary['liabilities']),
+
+      epsAvg3y: _toNullableDouble(analysis['epsAvg3y']),
+      roeAvg5y: _toNullableDouble(analysis['roeAvg5y']),
+      epsHistory: _parseYearMetrics(analysis['epsHistory']),
+      roeHistory: _parseYearMetrics(analysis['roeHistory']),
+      lossYears: _parseIntList(analysis['lossYears']),
+      debtRatio: _toNullableDouble(analysis['debtRatio']),
+      hasDividend: analysis['hasDividend'] == null
+          ? null
+          : analysis['hasDividend'] == true,
     );
   }
 
   // =========================
   // DART 파싱/보조
   // =========================
-
-  _ReprtInfo _reprtInfo(int year, String reprtCode) {
-    switch (reprtCode) {
-      case '11013':
-        return _ReprtInfo('$year 1Q', '${year}0331');
-      case '11012':
-        return _ReprtInfo('$year H1', '${year}0630');
+  String _reprtLabelFromCode(String? code) {
+    switch (code) {
+      case '11011':
+        return '연간';
       case '11014':
-        return _ReprtInfo('$year 3Q', '${year}0930');
-      case '11011':
+        return '3Q';
+      case '11012':
+        return '반기';
+      case '11013':
+        return '1Q';
       default:
-        return _ReprtInfo('$year FY', '${year}1231');
+        return '';
     }
-  }
-
-  double _annualizeProfit(double profit, String reprtCode) {
-    switch (reprtCode) {
-      case '11013': // 1Q
-        return profit * 4.0;
-      case '11012': // H1
-        return profit * 2.0;
-      case '11014': // 3Q
-        return profit * (4.0 / 3.0);
-      case '11011':
-      default:
-        return profit;
-    }
-  }
-
-  // ===== 당기순이익(원본 금액) =====
-  num _pickNetIncomeFromDart(List<Map<String, dynamic>> rows) {
-    final isRows = rows.where((m) {
-      final sj = (m['sj_div'] ?? '').toString();
-      return sj == 'IS' || sj == 'CIS';
-    }).toList();
-
-    if (isRows.isEmpty) return 0;
-
-    // account_id 우선
-    const idPriority = <String>[
-      'ifrs-full_ProfitLossAttributableToOwnersOfParent',
-      'ifrs-full_ProfitLoss',
-      'dart_ProfitLoss',
-    ];
-
-    for (final id in idPriority) {
-      final hit = isRows.cast<Map<String, dynamic>>().firstWhere(
-            (x) => (x['account_id'] ?? '').toString() == id,
-            orElse: () => <String, dynamic>{},
-          );
-      if (hit.isNotEmpty) {
-        final v = _toNum(hit['thstrm_add_amount']);
-        if (v != 0) return v;
-        final v2 = _toNum(hit['thstrm_amount']);
-        if (v2 != 0) return v2;
-      }
-    }
-
-    // account_nm 포함 검색
-    const namePriority = <String>[
-      '지배기업소유주지분당기순이익',
-      '당기순이익',
-      '당기순이익(손실)',
-    ];
-
-    for (final key in namePriority) {
-      final hit = isRows.cast<Map<String, dynamic>>().firstWhere(
-            (x) => (x['account_nm'] ?? '')
-                .toString()
-                .replaceAll(' ', '')
-                .contains(key),
-            orElse: () => <String, dynamic>{},
-          );
-      if (hit.isNotEmpty) {
-        final v = _toNum(hit['thstrm_add_amount']);
-        if (v != 0) return v;
-        final v2 = _toNum(hit['thstrm_amount']);
-        if (v2 != 0) return v2;
-      }
-    }
-
-    return 0;
-  }
-
-  // ===== 자본총계 =====
-  num _pickEquityFromDart(List<Map<String, dynamic>> rows) {
-    final exact = rows.firstWhere(
-      (m) => (m['account_nm'] ?? '').toString() == '자본총계',
-      orElse: () => <String, dynamic>{},
-    );
-    if (exact.isNotEmpty) {
-      final v = _toNum(exact['thstrm_amount']);
-      if (v != 0) return v;
-      return _toNum(exact['thstrm_add_amount']);
-    }
-
-    for (final key in const ['자본총계', '총자본']) {
-      final hit = rows.firstWhere(
-        (m) => (m['account_nm'] ?? '').toString().contains(key),
-        orElse: () => <String, dynamic>{},
-      );
-      if (hit.isNotEmpty) {
-        final v = _toNum(hit['thstrm_amount']);
-        if (v != 0) return v;
-        return _toNum(hit['thstrm_add_amount']);
-      }
-    }
-    return 0;
-  }
-
-  // ===== 매출액 =====
-  num _pickRevenueFromDart(List<Map<String, dynamic>> rows) {
-    for (final r in rows) {
-      final nm = (r['account_nm'] ?? '').toString().trim(); 
-      if (nm.contains('매출액') || nm.contains('영업수익')) {
-        final add = _toNum(r['thstrm_add_amount']);
-        final amt = _toNum(r['thstrm_amount']);
-        final prevAdd = _toNum(r['frmtrm_add_amount']);
-        final prevAmt = _toNum(r['frmtrm_amount']);
-        return (add != 0) ? add : (amt != 0) ? amt : (prevAdd != 0) ? prevAdd : prevAmt;
-      }
-    }
-    return 0;
-  }
-
-  // ===== 영업이익 =====
-  num _pickOpIncomeFromDart(List<Map<String, dynamic>> rows) {
-    for (final r in rows) {
-      final nm = (r['account_nm'] ?? '').toString().trim(); 
-      if (nm.contains('영업이익')) {
-        final add = _toNum(r['thstrm_add_amount']);
-        final amt = _toNum(r['thstrm_amount']);
-        final prevAdd = _toNum(r['frmtrm_add_amount']);
-        final prevAmt = _toNum(r['frmtrm_amount']);
-        return (add != 0) ? add : (amt != 0) ? amt : (prevAdd != 0) ? prevAdd : prevAmt;
-      }
-    }
-    return 0;
-  }
-
-  // =========================
-  // DPS 시도 (배당)
-  // =========================
-  Future<double> _tryFetchDps({
-    required DartProxyClient dart,
-    required String corpCode,
-    required int year,
-    required String reprtCode,
-  }) async {
-    try {
-      final list = await dart.alotMatter(
-        corpCode: corpCode,
-        year: year,
-        reprtCode: reprtCode,
-      );
-
-      if (list.isEmpty) {
-        _logDart('alot empty year=$year reprt=$reprtCode');
-        return 0.0;
-      }
-
-      final picked = _pickBestDpsRow(list);
-      if (picked == null) return 0.0;
-
-      final v = _toDouble(picked['thstrm']);
-      if (v == 0.0) return 0.0;
-
-      _logDart(
-          'alot picked year=$year reprt=$reprtCode se=${picked['se']} stock=${picked['stock_knd']} -> dps=$v');
-      return v;
-    } catch (e) {
-      _logDart('alot fail year=$year reprt=$reprtCode: $e');
-      return 0.0;
-    }
-  }
-
-  Map<String, dynamic>? _pickBestDpsRow(List<Map<String, dynamic>> list) {
-    Map<String, dynamic>? best;
-    int bestScore = -999999;
-
-    for (final m in list) {
-      final se = (m['se'] ?? '').toString().replaceAll(' ', '');
-      final stock = (m['stock_knd'] ?? '').toString().replaceAll(' ', '');
-      final v = _toDouble(m['thstrm']);
-
-      int score = 0;
-
-      final hasJooDang = se.contains('주당');
-      final hasCash = se.contains('현금');
-      final hasDividend = se.contains('배당');
-      final hasDividendAmt = se.contains('배당금') || se.contains('배당액');
-
-      if (hasJooDang && hasCash && hasDividend) {
-        score += 1000;
-      } else if (hasJooDang && hasDividendAmt) {
-        score += 850;
-      } else if (hasJooDang && hasDividend) {
-        score += 700;
-      } else if (hasDividend || hasDividendAmt) {
-        score += 300;
-      }
-
-      if (stock.contains('보통주')) score += 250;
-      if (stock.contains('우선주')) score -= 100;
-
-      if (v != 0.0) score += 400;
-      if (se.contains('(원)')) score += 50;
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = m;
-      }
-    }
-    return best;
   }
 }
-
-class _ReprtInfo {
-  final String label;
-  final String basDt; // YYYYMMDD
-  const _ReprtInfo(this.label, this.basDt);
-}
+ 

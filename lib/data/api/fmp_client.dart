@@ -125,15 +125,25 @@ class FmpClient {
   Future<List<Map<String, dynamic>>> incomeStatement({
     required String symbol,
     int limit = 12,
+    String period = 'annual',
   }) {
-    return _getListMap('/fmp/income-statement', {'symbol': symbol, 'limit': '$limit'});
+    return _getListMap('/fmp/income-statement', {
+      'symbol': symbol,
+      'limit': '$limit',
+      'period': period,
+    });
   }
 
   Future<List<Map<String, dynamic>>> balanceSheet({
     required String symbol,
     int limit = 1,
+    String period = 'annual',
   }) {
-    return _getListMap('/fmp/balance-sheet-statement', {'symbol': symbol, 'limit': '$limit'});
+    return _getListMap('/fmp/balance-sheet-statement', {
+      'symbol': symbol,
+      'limit': '$limit',
+      'period': period,
+    });
   }
 
   Future<Map<String, dynamic>?> profileOne(String symbol) {

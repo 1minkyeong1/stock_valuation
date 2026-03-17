@@ -16,7 +16,12 @@ class UsStubRepository implements StockRepository {
     final ex = _guessExchange(t);
 
     return [
-      StockSearchItem(code: t, name: t, market: ex),
+      StockSearchItem(
+        code: t,
+        name: t,
+        market: ex,
+        logoUrl: null,
+      ),
     ];
   }
 
@@ -32,6 +37,27 @@ class UsStubRepository implements StockRepository {
       year: null,
       basDt: null,
       periodLabel: "STUB",
+    );
+  }
+
+  @override
+  Future<StockFinancialDetails> getFinancialDetails(String code, {int? targetYear}) async {
+    final current = await getFundamentals(code, targetYear: targetYear);
+
+    return StockFinancialDetails(
+      current: current,
+      revenue: null,
+      opIncome: null,
+      netIncome: null,
+      equity: null,
+      liabilities: null,
+      epsAvg3y: null,
+      roeAvg5y: null,
+      epsHistory: const [],
+      roeHistory: const [],
+      lossYears: const [],
+      debtRatio: null,
+      hasDividend: current.dps > 0,
     );
   }
 

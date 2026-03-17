@@ -196,7 +196,7 @@ class _AboutPageState extends State<AboutPage> {
             title: const Text('오픈소스 라이선스'),
             onTap: () => showLicensePage(
               context: context,
-              applicationName: '주식적정가계산기',
+              applicationName: '주식적정가격계산기',
               applicationVersion: versionText,
             ),
           ),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:stock_valuation_app/models/market.dart';
 import 'package:stock_valuation_app/data/stores/repo_hub.dart';
@@ -23,6 +24,8 @@ import 'package:stock_valuation_app/widgets/inputs/metric_field_with_badge.dart'
 import 'package:stock_valuation_app/services/external_link_service.dart';
 import 'package:stock_valuation_app/utils/money_input_formatter.dart';
 import 'package:stock_valuation_app/pages/financial_statement_page.dart';
+import 'package:stock_valuation_app/pages/search_page.dart';
+import 'package:stock_valuation_app/utils/search_alias.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
@@ -41,8 +44,6 @@ class ResultPage extends StatefulWidget {
 }
 
 class _ResultPageState extends State<ResultPage> {
-  // 재무는 2025년만 사용(없으면 2024 fallback) - 안내 메시지에서 사용
-  static const int _targetFinanceYear = 2025;
 
   StockFundamentals? _fundamentals;
 
@@ -51,7 +52,6 @@ class _ResultPageState extends State<ResultPage> {
   String? _error;
 
   String? _priceBasDt; // yyyymmdd
-  int? _usedFinanceYear;
 
   // 즐겨찾기
   final _favStore = FavoritesStore();
@@ -102,6 +102,120 @@ class _ResultPageState extends State<ResultPage> {
     debugPrint('[ResultPage][STAGE] $s');
   }
 
+  void _openSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => SearchPage(hub: widget.hub)),
+    );
+  }
+
+  // 미국티커 한글표시용
+  String get _displayName {
+    if (!_isUS) return widget.item.name;
+
+    final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+    return ko ?? widget.item.name;
+  }
+
+  String? get _originalUsName {
+    if (!_isUS) return null;
+
+    final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+    final en = widget.item.name.trim();
+
+    if (ko == null || en.isEmpty || ko == en) return null;
+    return en;
+  }
+
+  // 기업 아이콘
+  String _headerMarkText() {
+    final name = _displayName.trim();
+
+    if (_isUS) {
+      final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+      if (ko != null && ko.isNotEmpty) {
+        return ko.substring(0, 1);
+      }
+
+      final code = widget.item.code
+          .toUpperCase()
+          .replaceAll(RegExp(r'[^A-Z0-9]'), '');
+      if (code.length >= 2) return code.substring(0, 2);
+      if (code.isNotEmpty) return code;
+      return 'U';
+    }
+
+    if (name.isNotEmpty) return name.substring(0, 1);
+    return 'K';
+  }
+
+  // 로고 반응형 사이즈 조절
+  double _responsiveHeaderMarkSize(
+    BuildContext context, {
+    double base = 40,
+    double max = 52,
+  }) {
+    final ts = MediaQuery.of(context).textScaler.scale(1.0).clamp(1.0, 1.35);
+    return (base + (ts - 1.0) * 10).clamp(base, max).toDouble();
+  }
+
+  Widget _headerCompanyMark({double size = 40}) {
+    final logoUrl = widget.item.logoUrl?.trim();
+    final base = _isUS ? Colors.indigo : Colors.teal;
+    final text = _headerMarkText();
+
+    debugPrint('[headerCompanyMark] code=${widget.item.code}, name=${widget.item.name}, logoUrl=[$logoUrl]');
+
+    Widget fallback() {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: base.withAlpha(20),
+          borderRadius: BorderRadius.circular(size / 2),
+          border: Border.all(color: base.withAlpha(70)),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            text,
+            textScaler: const TextScaler.linear(1.0),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: base.withAlpha(230),
+              fontWeight: FontWeight.w900,
+              fontSize: size * 0.32,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (logoUrl == null || logoUrl.isEmpty) {
+      debugPrint('[headerCompanyMark] EMPTY logoUrl -> fallback, code=${widget.item.code}');
+      return fallback();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size / 2),
+      child: CachedNetworkImage(
+        imageUrl: logoUrl,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => fallback(),
+        errorWidget: (context, url, error) {
+          debugPrint('[headerCompanyMark] load failed, url=[$url], error=$error');
+          return fallback();
+        },
+        fadeInDuration: const Duration(milliseconds: 120),
+        fadeOutDuration: const Duration(milliseconds: 80),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -110,6 +224,8 @@ class _ResultPageState extends State<ResultPage> {
     _epsCtrl = TextEditingController();
     _bpsCtrl = TextEditingController();
     _dpsCtrl = TextEditingController();
+
+    
 
     // ✅ 가격 포맷터 준비
     _priceFormatterKr = MoneyInputFormatter(allowDecimal: false);
@@ -237,7 +353,6 @@ class _ResultPageState extends State<ResultPage> {
     StockFundamentals f = const StockFundamentals(eps: 0, bps: 0, dps: 0);
 
     String? nextPriceBasDt;
-    int? nextUsedFinanceYear;
 
     try {
       // 1) 가격
@@ -268,12 +383,9 @@ class _ResultPageState extends State<ResultPage> {
               .timeout(const Duration(seconds: 12), onTimeout: () {
             throw Exception('재무 조회 타임아웃(12s)');
           });
-
-          nextUsedFinanceYear = f.year;
         } catch (e, st) {
           debugPrint('[ResultPage] fundamentals fail: $e\n$st');
           f = const StockFundamentals(eps: 0, bps: 0, dps: 0);
-          nextUsedFinanceYear = null;
         }
       }
 
@@ -327,7 +439,6 @@ class _ResultPageState extends State<ResultPage> {
 
       setState(() {
         _priceBasDt = nextPriceBasDt;
-        _usedFinanceYear = nextUsedFinanceYear;
         _fundamentals = f;
         _loading = false;
       });
@@ -445,7 +556,7 @@ class _ResultPageState extends State<ResultPage> {
   @override
   Widget build(BuildContext context) {
     debugPrint('[ResultPage] build loading=$_loading error=$_error');
-    final name = widget.item.name;
+    final name = _displayName;
 
     return Scaffold(
       appBar: AppBar(
@@ -453,17 +564,22 @@ class _ResultPageState extends State<ResultPage> {
         backgroundColor: _accent.withAlpha(18),
         elevation: 0,
         actions: [
+           IconButton(
+              tooltip: '검색',
+              icon: const Icon(Icons.search),
+              onPressed: _openSearch,  // 검색창 이동
+            ),
           IconButton(
             icon: Icon(
               _isFav ? Icons.star : Icons.star_border,
               color: _isFav ? Colors.amber : null,
             ),
-            onPressed: _toggleFavorite, // ✅ 즐겨찾기
+            onPressed: _toggleFavorite, // 즐겨찾기
           ),
           IconButton(
             tooltip: _showAdvanced ? "고급보기 숨기기" : "고급보기 보기",
             icon: Icon(_showAdvanced ? Icons.visibility : Icons.visibility_off),
-            onPressed: _toggleViewMode, // ✅ 눈 아이콘 = 토글
+            onPressed: _toggleViewMode, // 눈 아이콘 = 토글
           ),
           Align(
             alignment: Alignment.centerLeft,
@@ -509,7 +625,7 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   Widget _bodyView() {
-    final name = widget.item.name;
+    final name = _displayName;
     final code = widget.item.code;
 
     // 입력값
@@ -546,7 +662,7 @@ class _ResultPageState extends State<ResultPage> {
       // 노치/라운드/제스처 영역 + 최소 12 padding 확보
       minimum: const EdgeInsets.all(12),
       child: ListView(
-        padding: EdgeInsets.zero, // ✅ SafeArea에서 이미 패딩 주니까 0으로
+        padding: EdgeInsets.zero, 
         children: [
           _headerCard(name, code),
           const SizedBox(height: 8),
@@ -562,7 +678,10 @@ class _ResultPageState extends State<ResultPage> {
 
           _missingDataHintCard(),
           const SizedBox(height: 8),
-          _inputCard(),
+          KeyedSubtree(
+            key: const ValueKey('input_card'),
+            child: _inputCard(),
+          ),
           const SizedBox(height: 8),
           _resultCard(currentPrice: price, result: result, calcError: calcError),
           const SizedBox(height: 8),
@@ -573,6 +692,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 헤더 카드
   Widget _headerCard(String name, String code) {
     final marketText = (widget.market == Market.kr) ? "KR" : "US";
     final f = _fundamentals ?? _initF;
@@ -592,9 +712,30 @@ class _ResultPageState extends State<ResultPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  "$name ($code) · $marketText",
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _headerCompanyMark(size: _responsiveHeaderMarkSize(context)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "$name ($code) · $marketText",
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          ),
+                          if (_originalUsName != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              "$_originalUsName",
+                              style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -603,7 +744,15 @@ class _ResultPageState extends State<ResultPage> {
                       : "데이터 출처: FMP (Financial Modeling Prep)",
                   style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-                const SizedBox(height: 6),
+
+                // if (f.periodLabel != null && f.periodLabel!.trim().isNotEmpty) ...[
+                //   const SizedBox(height: 6),
+                //   Text(
+                //     "재무 기준: ${f.periodLabel!}",
+                //     style: const TextStyle(fontSize: 12, color: Colors.grey),
+                //   ),
+                // ],
+
                 if (f.basDt != null) ...[
                   const SizedBox(height: 4),
                   Text(
@@ -653,8 +802,12 @@ class _ResultPageState extends State<ResultPage> {
 
     if (missing.isEmpty) return const SizedBox.shrink();
 
-    final usedYear = _usedFinanceYear ?? _targetFinanceYear;
-    final fellBack = (_usedFinanceYear != null) && (_usedFinanceYear != _targetFinanceYear);
+    final f = _fundamentals ?? _initF;
+    final usedPeriod = f.periodLabel?.trim();
+    final usedFinanceText = (usedPeriod != null && usedPeriod.isNotEmpty)
+        ? usedPeriod
+        : (f.year != null ? "${f.year}년" : null);
+
     final dpsZero = (dps == 0);
 
     // ✅ 고급(true)=간단, 초급(false)=자세히
@@ -662,11 +815,11 @@ class _ResultPageState extends State<ResultPage> {
 
     final brief = "EPS/BPS 자동값이 비어 있습니다. (탭하면 보기 전환)";
     final detail = (widget.market == Market.kr)
-        ? "현재 앱은 이번 계산에 $usedYear년 재무를 사용했습니다.\n"
-            "$usedYear년 재무가 미공개/승인대기/갱신 전인 종목은 EPS/BPS가 0으로 표시될 수 있어요.\n"
-            "${fellBack ? "※ $_targetFinanceYear 값이 부족해 $usedYear로 자동 전환했습니다.\n" : ""}"
-            "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
-            "값을 직접 입력하면 즉시 재계산됩니다."
+        ? "현재 앱은 최신 사용가능 재무를 자동 선택해서 계산합니다.\n"
+          "${usedFinanceText != null ? "현재 사용 기준: $usedFinanceText\n" : ""}"
+          "최신 연간/분기 재무가 아직 공시되지 않았으면 직전 재무를 사용할 수 있어요.\n"
+          "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
+          "값을 직접 입력하면 즉시 재계산됩니다."
         : "해당 값은 공시/배당 반영 타이밍 또는 API 제공 범위에 따라 비어 있을 수 있어요.\n"
             "${dpsZero ? "※ DPS=0은 무배당(정상) 또는 데이터 미제공일 수 있어요.\n" : ""}"
             "값을 직접 입력하면 즉시 재계산됩니다.";
@@ -730,6 +883,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 텍스트박스 카드
   Widget _inputCard() {
     final priceFormatter = _isUS ? _priceFormatterUs : _priceFormatterKr;
 
@@ -787,6 +941,7 @@ class _ResultPageState extends State<ResultPage> {
 
             // Price
             LabeledNumberField(
+              key: const ValueKey('price_field'),
               label: _priceUnitText,
               controller: _priceCtrl,
               onChanged: (_) => _onAnyInputChanged(),
@@ -798,6 +953,7 @@ class _ResultPageState extends State<ResultPage> {
 
             // EPS/BPS/DPS
             MetricFieldWithBadge(
+              key: const ValueKey('eps_field'),
               isUS: _isUS,
               label: "EPS",
               controller: _epsCtrl,
@@ -806,6 +962,7 @@ class _ResultPageState extends State<ResultPage> {
             const SizedBox(height: 8),
 
             MetricFieldWithBadge(
+              key: const ValueKey('bps_field'),
               isUS: _isUS,
               label: "BPS",
               controller: _bpsCtrl,
@@ -814,6 +971,7 @@ class _ResultPageState extends State<ResultPage> {
             const SizedBox(height: 8),
 
             MetricFieldWithBadge(
+              key: const ValueKey('dps_field'),
               isUS: _isUS,
               label: "DPS",
               controller: _dpsCtrl,
@@ -965,7 +1123,7 @@ class _ResultPageState extends State<ResultPage> {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Text(
-            "계산 불가: ${calcError ?? "데이터가 부족합니다."}",
+            "아직 계산에 필요한 값이 부족해요. 입력값을 한 번 확인해 주세요.",
             style: const TextStyle(color: Colors.red),
           ),
         ),

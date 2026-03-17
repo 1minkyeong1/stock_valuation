@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:stock_valuation_app/data/repository/stock_repository.dart';
 import 'package:stock_valuation_app/data/stores/favorites_store.dart';
@@ -12,6 +13,7 @@ import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/models/market.dart';
 import 'package:stock_valuation_app/utils/search_alias.dart';
 import 'about_page.dart';
+import '../pages/ranking_page.dart';
 
 class SearchPage extends StatefulWidget {
  final RepoHub hub;
@@ -38,8 +40,6 @@ class _SearchPageState extends State<SearchPage> {
 
   final _recentStore = RecentStore();
   List<StockSearchItem> _recents = [];
-
-  List<AliasGroup> _usAliasGroups = [];
 
  @override
   void initState() {
@@ -81,52 +81,6 @@ class _SearchPageState extends State<SearchPage> {
   bool _isComposing() {
     final c = _controller.value.composing;
     return c.isValid && !c.isCollapsed;
-  }
-
-  // 미국 검색 멀티조회
-  Widget _usAliasPicker({required bool compact}) {
-    // US 탭이 아니면 숨김
-    if (_tab != Market.us) return const SizedBox.shrink();
-
-    // 멀티 후보가 2개 이상일 때만 노출
-    if (_usAliasGroups.length < 2) return const SizedBox.shrink();
-
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-            child: Text(
-              "매핑된 후보 (${_usAliasGroups.length})",
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-          ..._usAliasGroups.map((g) {
-            // g.primaryName: 표시용 이름(예: "마이크로" 또는 "버크셔")
-            // g.code: 실제 티커(예: MSFT, BRK-B)
-            final title = g.primaryName;
-            final ticker = g.code;
-
-            return ListTile(
-              dense: compact,
-              title: Text("$title ($ticker)"),
-              onTap: () {
-                // ✅ 선택한 티커로 검색 실행
-                _controller.text = ticker;
-                _controller.selection = TextSelection.collapsed(offset: ticker.length);
-
-                // 후보는 선택 후 숨김
-                setState(() => _usAliasGroups = []);
-
-                _runSearch(keyword: ticker); // 실제 검색 1번
-              },
-            );
-          }),
-          const SizedBox(height: 6),
-        ],
-      ),
-    );
   }
 
   // 높이계산함수(잘림현상 사이즈조절)
@@ -242,32 +196,25 @@ class _SearchPageState extends State<SearchPage> {
       _error = null;
     });
 
-    // ✅ US 탭: 한글 입력이면 멀티 후보를 먼저 만든다
-    List<AliasGroup> aliasGroups = const [];
-    if (_tab == Market.us && SearchAlias.hasHangul(q)) {
-      aliasGroups = SearchAlias.resolveUsGroups(q, limit: 12);
-      if (!mounted) return;
-      setState(() => _usAliasGroups = aliasGroups);
-    } else {
-      if (!mounted) return;
-      setState(() => _usAliasGroups = []);
-    }
-
-    // ✅ 멀티 후보가 2개 이상이면: 자동으로 1개를 고르지 말고 "선택"시키기
-    if (_tab == Market.us && aliasGroups.length >= 2) {
-      if (!mounted) return;
-      if (seq != _searchSeq) return;
-
-      setState(() {
-        _loading = false;
-        _results = [];
-     //   _error = "여러 종목이 매핑됩니다. 아래에서 하나를 선택해 주세요.";
-      });
-      FocusScope.of(context).requestFocus(_searchFocus);
-      return; // ✅ 여기서 끝 (hub.search 호출 안 함)
-    }
-
     try {
+      // US 한글 alias 다중 결과는 결과 리스트에 바로 표시
+      if (_isLikelyUsAliasQuery(q)) {
+        final aliasGroups = SearchAlias.resolveUsGroups(q, limit: 12);
+
+        if (aliasGroups.length >= 2) {
+          if (!mounted) return;
+          if (seq != _searchSeq) return;
+
+          setState(() {
+            _results = _aliasGroupsToItems(aliasGroups);
+            _loading = false;
+            _error = null;
+          });
+
+          FocusScope.of(context).requestFocus(_searchFocus);
+          return;
+        }
+      }
       // 탭에 맞게 쿼리 변환(US: 한글->티커, KR: 한글->코드)
       final mapped = _mapQueryByTab(_tab, q);
 
@@ -275,10 +222,9 @@ class _SearchPageState extends State<SearchPage> {
 
       //  US 탭에서 "국내로 보이는" 입력인데 US alias 변환이 안 된 경우 → 안내만
       if (_tab == Market.us) {
-        final bool hasUsAlias = aliasGroups.isNotEmpty;
+        final bool hasUsAlias = SearchAlias.resolveUsGroups(q, limit: 1).isNotEmpty;
         final bool looksKr = _looksLikeKrQuery(q) || SearchAlias.looksLikeKrCode(q);
 
-        // US로 매핑이 안 됐고, KR처럼 보이면: 자동전환 X, 안내만
         if (!hasUsAlias && looksKr) {
           if (!mounted) return;
           if (seq != _searchSeq) return;
@@ -340,32 +286,44 @@ class _SearchPageState extends State<SearchPage> {
     if (raw.isEmpty) return raw;
 
     if (tab == Market.kr) {
-
-      // 1) 숫자 4~6자리면 6자리로 패딩
       final digits = raw.replaceAll(' ', '');
       if (RegExp(r'^\d{4,6}$').hasMatch(digits)) {
         return digits.padLeft(6, '0');
       }
 
-      // 2) 0007C0 같은 영숫자 6자리면 대문자
       final up = raw.replaceAll(' ', '').toUpperCase();
       if (RegExp(r'^[0-9A-Z]{6}$').hasMatch(up)) return up;
 
-      // 3) 그 외(한글/부분검색)는 그대로
       return raw;
     }
 
     // tab == Market.us
     final groups = SearchAlias.resolveUsGroups(raw, limit: 12);
 
-    // ✅ 딱 1개로 확정될 때만 티커로 치환해서 검색
-    if (groups.length == 1) return groups.first.code;
+    // ✅ 1개일 때만 바로 티커 치환
+    if (groups.length == 1) {
+      return groups.first.code;
+    }
 
-    // ✅ 여러 개면 원문 유지(실제 검색은 위 _runSearch에서 return 처리됨)
-    if (groups.length >= 2) return raw;
-
-    // alias 없으면 기존처럼
+    // 여러 개면 원문 유지
     return raw.toUpperCase();
+  }
+
+  // US 거래소로 분류
+  String _displayMarketText(StockSearchItem s) {
+    final market = s.market.trim();
+    if (market.isEmpty) return _isUsItem(s) ? 'US' : '-';
+    return market;
+  }
+
+  // 로고 반응형 사이즈
+  double _responsiveMarkSize(
+    BuildContext context, {
+    double base = 36,
+    double max = 48,
+  }) {
+    final ts = MediaQuery.of(context).textScaler.scale(1.0).clamp(1.0, 1.35);
+    return (base + (ts - 1.0) * 10).clamp(base, max).toDouble();
   }
 
   // =========================
@@ -374,30 +332,36 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _openResult(StockSearchItem s, {bool recordRecent = true}) async {
     debugPrint('[OpenResult] start ${s.code}');
 
-    // 1) recent 저장은 실패해도 넘어가게
+    // 1) 최근검색 저장은 기다리지 않음
     if (recordRecent) {
+      unawaited(
+        _recentStore.add(_tab, s).catchError((e, st) {
+          debugPrint('[OpenResult] recent error: $e');
+          debugPrint('$st');
+        }),
+      );
+    }
+
+    if (!mounted) return;
+
+    // 2) 광고 노출 기회 카운트 + 준비되어 있을 때만 표시
+    AdService.I.onOpenResult();
+
+    if (AdService.I.adsEnabled &&
+        AdService.I.isInterstitialEligibleNow &&
+        AdService.I.hasReadyInterstitial) {
       try {
-        await _recentStore.add(_tab, s);
-        await _loadRecents();
-        debugPrint('[OpenResult] recent saved');
+        await AdService.I.maybeShowInterstitial();
+        debugPrint('[OpenResult] ad done');
       } catch (e, st) {
-        debugPrint('[OpenResult] recent error: $e\n$st');
+        debugPrint('[OpenResult] ad error: $e');
+        debugPrint('$st');
       }
     }
+
     if (!mounted) return;
 
-    // 2) 광고는 실패해도 넘어가게
-    try {
-      AdService.I.onOpenResult();
-      await AdService.I.maybeShowInterstitial();
-      debugPrint('[OpenResult] ad done');
-    } catch (e, st) {
-      debugPrint('[OpenResult] ad error: $e\n$st');
-    }
-    if (!mounted) return;
-
-    // ✅ 3) push 직전에 Navigator를 다시 잡기 (중요)
-    debugPrint('[OpenResult] before push');
+    // 3) 결과 화면 이동
     final nav = Navigator.of(context);
 
     try {
@@ -416,7 +380,7 @@ class _SearchPageState extends State<SearchPage> {
 
     if (!mounted) return;
 
-    // 4) 뒤로 왔을 때 초기화(원하면 유지/삭제 선택)
+    // 4) 뒤로 왔을 때 초기화
     _controller.clear();
     _debounce?.cancel();
     _searchSeq++;
@@ -603,7 +567,7 @@ class _SearchPageState extends State<SearchPage> {
                   RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
               ),
-              onSelectionChanged: (s) => _changeMarketTab(s.first), // ✅ 이것만 남김
+              onSelectionChanged: (s) => _changeMarketTab(s.first),
             ),
           ),
         ],
@@ -611,26 +575,122 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  void _showUsNaverHelp() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('미국 종목 네이버 비교 안내'),
-        content: const Text(
-          '미국 종목은 네이버에서 티커 표기(.O / .N / .K 등) 규칙이 달라 '
-          '앱에서 종목 상세로 “직접 연결”이 안 될 수 있어요.\n\n'
-          '비교가 필요하면 네이버 해외주식에서 티커(AAPL, TSLA 등)로 검색해 주세요.',
+  // 최근검색, 즐겨찾기 us 한글
+  bool _isUsItem(StockSearchItem s) {
+    final m = s.market.trim().toUpperCase();
+    return _tab == Market.us || m == 'US';
+  }
+
+  String _displayItemName(StockSearchItem s) {
+    if (!_isUsItem(s)) return s.name;
+
+    final ko = SearchAlias.usPrimaryKoName(s.code);
+    return ko ?? s.name;
+  }
+
+  String? _displayItemOriginalName(StockSearchItem s) {
+    if (!_isUsItem(s)) return null;
+
+    final ko = SearchAlias.usPrimaryKoName(s.code);
+    final en = s.name.trim();
+
+    if (ko == null || en.isEmpty || ko == en) return null;
+    return en;
+  }
+
+  // alisa 결과에도 로고 넣기 함수
+  List<StockSearchItem> _aliasGroupsToItems(List<AliasGroup> groups) {
+    return groups.map((g) {
+      return StockSearchItem(
+        code: g.code,
+        name: g.primaryName,
+        market: 'US',
+      );
+    }).toList();
+  }
+
+  bool _isLikelyUsAliasQuery(String q) {
+    return _tab == Market.us && SearchAlias.hasHangul(q.trim());
+  }
+
+  String _markTextForItem(StockSearchItem s) {
+    final displayName = _displayItemName(s).trim();
+
+    if (_isUsItem(s)) {
+      final ko = SearchAlias.usPrimaryKoName(s.code);
+      if (ko != null && ko.isNotEmpty) {
+        return ko.substring(0, 1);
+      }
+
+      final code = s.code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+      if (code.length >= 2) return code.substring(0, 2);
+      if (code.isNotEmpty) return code;
+      return 'U';
+    }
+
+    if (displayName.isNotEmpty) return displayName.substring(0, 1);
+    return 'K';
+  }
+
+  Widget _companyMark(StockSearchItem s, {double size = 36}) {
+    final isUs = _isUsItem(s);
+    final base = isUs ? Colors.indigo : Colors.teal;
+    final text = _markTextForItem(s);
+    final logoUrl = s.logoUrl?.trim();
+
+    debugPrint('[companyMark] code=${s.code}, name=${s.name}, logoUrl=[$logoUrl]');
+
+    Widget fallback() {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: base.withAlpha(20),
+          borderRadius: BorderRadius.circular(size / 2),
+          border: Border.all(color: base.withAlpha(70)),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('확인'),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            text,
+            textScaler: const TextScaler.linear(1.0),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: base.withAlpha(230),
+              fontWeight: FontWeight.w900,
+              fontSize: size * 0.32,
+            ),
           ),
-        ],
+        ),
+      );
+    }
+
+    if (logoUrl == null || logoUrl.isEmpty) {
+      debugPrint('[companyMark] EMPTY logoUrl -> fallback, code=${s.code}');
+      return fallback();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size / 2),
+      child: CachedNetworkImage(
+        imageUrl: logoUrl,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => fallback(),
+        errorWidget: (context, url, error) {
+          debugPrint('[companyMark] load failed, url=[$url], error=$error');
+          return fallback();
+        },
+        fadeInDuration: const Duration(milliseconds: 120),
+        fadeOutDuration: const Duration(milliseconds: 80),
       ),
     );
   }
-  
+
+ 
   Widget _sectionHeader({
     required String title,
     VoidCallback? onClear,
@@ -675,11 +735,14 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  // 최근검색 카드
   Widget _stockMiniCard(StockSearchItem s, {VoidCallback? onLongPress}) {
     final mq = MediaQuery.of(context);
     final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0);
-
     final cardW = (180.0 + (ts - 1.0) * 70.0).clamp(180.0, 260.0);
+
+    final displayName = _displayItemName(s);
+    final originalName = _displayItemOriginalName(s);
 
     Widget clampScale(Widget child, {double max = 1.2}) {
       final cur = mq.textScaler.scale(1.0);
@@ -693,6 +756,7 @@ class _SearchPageState extends State<SearchPage> {
     return InkWell(
       onTap: () => _openResult(s, recordRecent: true),
       onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(14),
       child: Container(
         width: cardW,
         padding: const EdgeInsets.all(12),
@@ -704,45 +768,63 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              s.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              s.code,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Colors.grey[800]),
-            ),
-            clampScale(
-              Text(
-                s.market,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.grey[700], fontSize: 12),
-              ),
-              max: 1.25,
-            ),
-            const Spacer(),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _companyMark(s, size: _responsiveMarkSize(context)),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: clampScale(
-                    const Text(
-                      "평가 보기",
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    max: 1.2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
+                        ),
+                      ),
+                      if (originalName != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          originalName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right, size: 16, color: _accent.withAlpha(220)),
               ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '${s.code} · ${_displayMarketText(s)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.grey[700],
+                fontSize: 12,
+              ),
+            ),
+            const Spacer(),
+            clampScale(
+              Text(
+                '평가보기',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _accent.withAlpha(220),
+                ),
+              ),
             ),
           ],
         ),
@@ -750,7 +832,67 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  // 즐겨찾기 목록형
+  Widget _favoriteListTile(StockSearchItem s, {VoidCallback? onLongPress}) {
+    final displayName = _displayItemName(s);
+    final originalName = _displayItemOriginalName(s);
+
+    return InkWell(
+      onTap: () => _openResult(s, recordRecent: true),
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: _accent.withAlpha(10),
+          border: Border.all(color: _accent.withAlpha(55)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            _companyMark(s, size: _responsiveMarkSize(context)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  if (originalName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      originalName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 2),
+                  Text(
+                    "${s.code} · ${_displayMarketText(s)}",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: _accent.withAlpha(220)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 결과 ?? 
   Widget _resultCardTile(StockSearchItem s) {
+    final displayName = _displayItemName(s);
+    final originalName = _displayItemOriginalName(s);
+
     return InkWell(
       onTap: () => _openResult(s, recordRecent: true),
       child: _leftAccentCard(
@@ -758,20 +900,30 @@ class _SearchPageState extends State<SearchPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: _accent2.withAlpha(20),
-              child: Icon(Icons.corporate_fare, color: _accent2.withAlpha(220)),
-            ),
+            _companyMark(s, size: _responsiveMarkSize(context)),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  if (originalName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      originalName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                    ),
+                  ],
                   const SizedBox(height: 2),
                   Text(
-                    "${s.code} · ${s.market}",
+                    "${s.code} · ${_displayMarketText(s)}",
                     style: TextStyle(color: Colors.grey[700], fontSize: 12),
                   ),
                 ],
@@ -935,12 +1087,24 @@ class _SearchPageState extends State<SearchPage> {
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
         ),
         actions: [
-          if (_tab == Market.us)
-            IconButton(
-              tooltip: '네이버 비교 안내',
-              icon: const Icon(Icons.help_outline),
-              onPressed: _showUsNaverHelp,
+          IconButton(
+            tooltip: '저평가 기업',
+            style: const ButtonStyle(
+              backgroundColor: WidgetStatePropertyAll(Colors.transparent),
+              overlayColor: WidgetStatePropertyAll(Colors.transparent),
+              shadowColor: WidgetStatePropertyAll(Colors.transparent),
+              surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
             ),
+            icon: const Icon(Icons.leaderboard_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => RankingPage(hub: widget.hub),
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: '앱 정보',
             style: const ButtonStyle(
@@ -978,22 +1142,6 @@ class _SearchPageState extends State<SearchPage> {
                       _searchBox(compact: isLand),
                       SizedBox(height: isLand ? 6 : 10),
 
-                      if (_tab == Market.us && !isLand) ...[
-                        Row(
-                          children: [
-                            const Icon(Icons.info_outline, size: 16, color: Colors.grey),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                "네이버 비교는 티커로 검색이 필요할 수 있어요. (우측 ? 참고)",
-                                style: TextStyle(color: Colors.grey[700], fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-
                       if (_loading) const LinearProgressIndicator(),
                       if (_error != null)
                         Padding(
@@ -1003,11 +1151,6 @@ class _SearchPageState extends State<SearchPage> {
 
                       const SizedBox(height: 8),
 
-                      // ✅ US 멀티 후보 선택 UI (결과 리스트 위에 표시)
-                      if (!showHistory) ...[
-                        _usAliasPicker(compact: isLand),
-                        const SizedBox(height: 8),
-                      ],
                     ],
                   ),
                 ),
@@ -1071,22 +1214,16 @@ class _SearchPageState extends State<SearchPage> {
             badgeColor: Colors.purple,
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: stripH,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: _favorites.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final s = _favorites[i];
-                return _stockMiniCard(
-                  s,
-                  onLongPress: () => _confirmDeleteFavorite(s),
-                );
-              },
-            ),
-          ),
+          ...List.generate(_favorites.length, (i) {
+            final s = _favorites[i];
+            return Padding(
+              padding: EdgeInsets.only(bottom: i == _favorites.length - 1 ? 0 : 8),
+              child: _favoriteListTile(
+                s,
+                onLongPress: () => _confirmDeleteFavorite(s),
+              ),
+            );
+          }),
         ] else ...[
           _emptyHintCard(
             icon: Icons.star_border,

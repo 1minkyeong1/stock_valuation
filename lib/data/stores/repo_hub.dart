@@ -30,4 +30,12 @@ class RepoHub {
     Future<PriceQuote> getPriceQuote(Market market, String codeOrSymbol) {
     return _repo(market).getPriceQuote(codeOrSymbol);
   }
+
+  Future<StockFinancialDetails> getFinancialDetails(
+    Market market,
+    String code, {
+    int? targetYear,
+  }) {
+    return _repo(market).getFinancialDetails(code, targetYear: targetYear);
+  }
 }

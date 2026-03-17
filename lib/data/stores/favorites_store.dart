@@ -22,11 +22,14 @@ class FavoritesStore {
         final marketName = mm['m']?.toString() ?? 'kr';
         if (marketName != m.name) continue;
 
-        items.add(StockSearchItem(
-          code: mm['code']?.toString() ?? '',
-          name: mm['name']?.toString() ?? '',
-          market: mm['market']?.toString() ?? '',
-        ));
+        items.add(
+          StockSearchItem(
+            code: mm['code']?.toString() ?? '',
+            name: mm['name']?.toString() ?? '',
+            market: mm['market']?.toString() ?? '',
+            logoUrl: mm['logoUrl']?.toString(),
+          ),
+        );
       }
     }
 
@@ -50,7 +53,6 @@ class FavoritesStore {
 
     final key = FinanceRules.key(m, item.code);
 
-    // 중복 제거 후 추가
     list.removeWhere((e) => e is Map && (e['key']?.toString() == key));
     list.insert(0, {
       'key': key,
@@ -58,6 +60,7 @@ class FavoritesStore {
       'code': item.code,
       'name': item.name,
       'market': item.market,
+      'logoUrl': item.logoUrl,
     });
 
     await sp.setString(_k, jsonEncode(list));

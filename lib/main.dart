@@ -4,14 +4,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
-import 'pages/search_page.dart';
+//import 'pages/search_page.dart';
+import 'pages/ranking_page.dart';
 import 'data/stores/repo_hub.dart';
 import 'services/ad_service.dart';
 
-// ✅ KR(KIS) Repo 추가
+//  KR(KIS) Repo
 import 'data/repository/kis_kr_stock_repository.dart';
 
-// ✅ US(FMP) 그대로 유지
+//  US(FMP)
 import 'data/api/fmp_client.dart';
 import 'data/repository/us_fmp_repository.dart';
 
@@ -19,7 +20,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _initAds();
 
-  // ✅ Worker URL만 있으면 됨 (KIS/FMP/OpenDART 키는 Worker에만 존재)
+  //  Worker URL만 있으면 됨 (KIS/FMP/OpenDART 키는 Worker에만 존재)
   final hub = _buildRepoHub(workerBaseUrl: _workerBaseUrl());
 
   runApp(StockValuationApp(hub: hub));
@@ -84,7 +85,8 @@ class StockValuationApp extends StatelessWidget {
           ),
         ),
       ),
-      home: SearchPage(hub: hub),
+      home: RankingPage(hub: hub),
+     // home: SearchPage(hub: hub),
     );
   }
 }

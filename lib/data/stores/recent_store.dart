@@ -16,15 +16,20 @@ class RecentStore {
     final items = <StockSearchItem>[];
 
     for (final e in list) {
-      if (e is Map<String, dynamic>) {
-        final marketName = e['m']?.toString() ?? 'kr';
+      if (e is Map) {
+        final mm = e.cast<String, dynamic>();
+
+        final marketName = mm['m']?.toString() ?? 'kr';
         if (marketName != m.name) continue;
 
-        items.add(StockSearchItem(
-          code: e['code']?.toString() ?? '',
-          name: e['name']?.toString() ?? '',
-          market: e['market']?.toString() ?? '',
-        ));
+        items.add(
+          StockSearchItem(
+            code: mm['code']?.toString() ?? '',
+            name: mm['name']?.toString() ?? '',
+            market: mm['market']?.toString() ?? '',
+            logoUrl: mm['logoUrl']?.toString(),
+          ),
+        );
       }
     }
     return items;
@@ -37,7 +42,6 @@ class RecentStore {
 
     final key = FinanceRules.key(m, item.code);
 
-    // 기존 같은 항목 제거 후 맨 앞에 삽입
     list.removeWhere((e) => e is Map && (e['key']?.toString() == key));
     list.insert(0, {
       'key': key,
@@ -45,9 +49,9 @@ class RecentStore {
       'code': item.code,
       'name': item.name,
       'market': item.market,
+      'logoUrl': item.logoUrl,
     });
 
-    // 길이 제한 (예: 30개)
     while (list.length > 30) {
       list.removeLast();
     }
