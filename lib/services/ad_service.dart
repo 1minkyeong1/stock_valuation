@@ -35,7 +35,7 @@ class AdService {
   bool get hasReadyInterstitial => _interstitial != null;
 
   // ------------------------------------------------------------
-  // ✅ 본인 광고 단위 ID(ANDROID)만 여기에 넣으세요 (ca-app-pub-xxx/yyy)
+  // ✅ 본인 광고 단위 ID 여기에 넣으세요 (ca-app-pub-xxx/yyy)
   // ------------------------------------------------------------
   static const String _androidBannerProd = 'ca-app-pub-4855768071671191/9260415794';
   static const String _androidInterstitialProd = 'ca-app-pub-4855768071671191/7923293139';
