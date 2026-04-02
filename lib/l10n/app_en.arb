@@ -1,0 +1,326 @@
+{
+  "@@locale": "en",
+  "appTitle": "Stock Fair Value Calculator",
+  "tabKr": "Korea",
+  "tabUs": "US",
+  "searchHint": "Search stocks",
+  "recentSearches": "Recent searches",
+  "financialStatements": "Financial statements",
+  "privacyPolicy": "Privacy Policy",
+  "termsOfService": "Terms of Service",
+  "openSourceLicenses": "Open source licenses",
+  "ranking": "Ranking",
+  "undervalued": "Undervalued",
+  "fairValue": "Fair value",
+  "currentPrice": "Current price",
+  "expectedReturn": "Expected return",
+  "dividendYield": "Dividend yield",
+  "roe": "ROE",
+  "per": "PER",
+  "pbr": "PBR",
+  "veryUndervalued": "Very undervalued",
+  "undervaluedLabel": "Undervalued",
+  "nearFairValue": "Near fair value",
+  "expensive": "Expensive",
+  "veryExpensive": "Very expensive",
+
+  "aboutApp": "About",
+  "loading": "Loading...",
+  "companyDescription": "An app for conservative investors who focus on clear financial data rather than uncertain future predictions or speculative trading.",
+  "contact": "Contact",
+  "emailInquiry": "Email inquiry",
+  "update": "Update",
+  "checkForUpdates": "Check for updates in store",
+  "installLatestVersion": "Install the latest version",
+  "misc": "Misc",
+  "close": "Close",
+  "invalidLink": "The link format is invalid.",
+  "cannotOpenLink": "Unable to open the link.",
+  "cannotOpenMailApp": "Unable to open the mail app.",
+  "privacyOpenWeb": "Open web page",
+  "appInquirySubject": "[App Inquiry]",
+  "versionLabel": "Version: {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+
+  "rankingPageTitle": "Undervalued Companies",
+  "search": "Search",
+  "refresh": "Refresh",
+  "clear": "Clear",
+
+  "krRankSearchHint": "Search by stock name or code",
+  "usRankSearchHint": "Search by company name or ticker",
+
+  "rankingUpdatedMeta": "{updated} (based on expected return)",
+  "@rankingUpdatedMeta": {
+    "placeholders": {
+      "updated": {
+        "type": "String"
+      }
+    }
+  },
+
+  "rankingItemCount": "{count} items",
+  "@rankingItemCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+
+  "rankingPriceMayUpdate": "Current prices may update again after opening this screen.",
+  "rankingStillGeneratingWait": "Ranking is being generated... Please wait!",
+  "requestUrlLabel": "Request URL",
+
+  "krRankingGeneratingWait": "KR ranking is being generated... Please wait.",
+  "krRankingGeneratingRetry": "KR ranking is being generated... Please try again shortly.",
+  "krRankingPreparing": "Preparing KR ranking...",
+  "krRankingSearchEmpty": "No results found in KR ranking search.",
+
+  "usRankingGeneratingWait": "US ranking is being generated... Please wait.",
+  "usRankingGeneratingRetry": "US ranking is being generated... Please try again shortly.",
+  "usRankingPreparing": "Preparing US ranking...",
+  "usRankingSearchEmpty": "No results found in US ranking search.",
+
+  "previousDayChangeNone": "Previous day -",
+  "changeNone": "Change -",
+  "usRankingError": "US ranking error: {error}",
+  "@usRankingError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+
+  "searchPageCompactHintKr": "Name/Code",
+  "searchPageCompactHintUs": "Ticker",
+  "searchPageHintKr": "Korean stock name or code (e.g. Samsung Electronics / 005930)",
+  "searchPageHintUs": "US ticker (e.g. AAPL / TSLA)",
+  "searchTabLooksKrGuide": "This looks like a Korean stock. Please search in the Korea tab.",
+  "searchErrorEmpty": "No results found.",
+  "searchButton": "Search",
+  "clearButton": "Clear",
+  "marketUs": "US",
+  "marketUnknown": "-",
+  "favorites": "Favorites",
+  "searchPageTitle": "Stock Search",
+  "moreMenu": "More",
+
+  "backupExport": "Export backup",
+  "backupImport": "Import backup",
+  "exportBackupCanceled": "Backup export was canceled.",
+  "exportBackupCreated": "Backup file created.\n{path}",
+  "@exportBackupCreated": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "exportBackupFailed": "Backup export failed: {error}",
+  "@exportBackupFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "importBackupCanceled": "Backup import was canceled.",
+  "importBackupTitle": "Import backup",
+  "importBackupConfirm": "This will replace the current device's favorites, recent searches, and inputs with the contents of the backup file.\n\nDo you want to continue?",
+  "importButton": "Import",
+  "importBackupSuccess": "Backup file imported.",
+  "importBackupFailed": "Backup import failed: {error}",
+  "@importBackupFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+
+  "recentDeleteTitle": "Delete recent search",
+  "recentDeleteConfirm": "Remove {name}({code}) from recent searches?",
+  "@recentDeleteConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "clearRecentTitle": "Delete all recent searches",
+  "clearRecentConfirm": "Delete all recent searches?",
+  "favoritesDeleteTitle": "Delete favorite",
+  "favoritesDeleteConfirm": "Remove {name}({code}) from favorites?",
+  "@favoritesDeleteConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "clearFavoritesTitle": "Delete all favorites",
+  "clearFavoritesConfirm": "Delete all favorites?",
+
+  "cancel": "Cancel",
+  "delete": "Delete",
+  "deleteAll": "Delete all",
+  "deletedItem": "{name} deleted",
+  "@deletedItem": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "recentCleared": "All recent searches have been deleted.",
+  "favoritesCleared": "All favorites have been deleted.",
+
+  "viewValuation": "View valuation",
+  "autoSearchHelp": "Auto-search runs automatically, and you can also search immediately with the magnifier on the right.",
+
+  "recentSearchesDeleteAllTooltip": "Delete all recent searches",
+  "favoritesDeleteAllTooltip": "Delete all favorites",
+
+  "recentSearchesEmptyTitle": "No recent searches yet",
+  "recentSearchesEmptyDesc": "Try searching for a stock above. Your search history will appear here.",
+  "favoritesEmptyTitle": "Favorites are empty",
+  "favoritesEmptyDesc": "Tap the ⭐ button on the stock valuation screen to collect items here.",
+
+  "emptySearchTitle": "No search results",
+  "emptySearchDescKrTryUs": "If there are no results in Korea, try searching the ticker in the US tab.",
+  "emptySearchDescKrCheck": "Please check the stock name/code again.",
+  "emptySearchDescUsCheck": "Please check the ticker again.",
+
+  "detailPageOpenFailed": "Failed to open details screen: {error}",
+  "@detailPageOpenFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+
+  "favorite": "Favorite",
+  "showAdvancedView": "Show advanced view",
+  "hideAdvancedView": "Hide advanced view",
+  "openNaverKr": "Open Naver Securities",
+  "openNaverGlobal": "Open Naver Global Search",
+  "retry": "Retry",
+  "loadingPriceStart": "Loading price",
+  "loadingPriceTimeout": "Price request timed out (8s)",
+  "loadingFundamentalsStart": "Loading fundamentals (EPS/BPS/DPS)",
+  "loadingFundamentalsTimeout": "Fundamentals request timed out (12s)",
+  "loadingApplyInitial": "Applying initial values",
+  "loadingRestoreSaved": "Restoring saved values",
+  "loadingDone": "Done",
+  "reloadedValues": "Values were reloaded.",
+  "naverOpenFailed": "Unable to open the Naver page.",
+  "naverUsHint": "For overseas stocks, search the ticker in Naver Global Stocks.",
+  "viewFinancialStatements": "View financial statements",
+  "savePdf": "Save PDF",
+  "financialSourceLabel": "Financial source: {source}",
+  "@financialSourceLabel": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "valuationErrorInvalidRequiredReturn": "Required return r must be greater than 0.",
+  "valuationErrorInvalidPrice": "Current price must be greater than 0.",
+  "valuationErrorInvalidBps": "It is difficult to calculate when BPS is 0 or below.",
+  
+  "backupErrorInvalidFormat": "The backup format is invalid.",
+  "backupErrorWrongApp": "This is not a backup file for this app.",
+  "backupErrorUnsupportedVersion": "This backup version is not supported.",
+
+  "fsPdfDocumentTitleSuffix": "Financial Statements",
+  "fsPdfSummarySectionTitle": "Financial Statement Summary",
+  "fsPdfBuffettAssistSectionTitle": "Buffett-style Helper Metrics",
+  "fsPdfTrendSectionTitle": "Long-term Trend",
+  "fsPdfStabilitySectionTitle": "Stability",
+
+  "fsPdfPeriodLabel": "Period",
+  "fsPdfRevenueLabel": "Revenue",
+  "fsPdfOpIncomeLabel": "Operating income",
+  "fsPdfNetIncomeLabel": "Net income",
+  "fsPdfEquityLabel": "Equity",
+  "fsPdfLiabilitiesLabel": "Liabilities",
+  "fsPdfFinancialSourceLabel": "Financial source",
+
+  "fsPdfAvg3yEpsLabel": "3Y average EPS",
+  "fsPdfAvg5yRoeLabel": "5Y average ROE",
+
+  "fsPdfYearlyEpsLabel": "EPS by year",
+  "fsPdfYearlyRoeLabel": "ROE by year",
+
+  "fsPdfLossYearsLabel": "Loss years",
+  "fsPdfDebtRatioLabel": "Debt ratio",
+  "fsPdfRecentDividendLabel": "Recent dividend",
+
+  "fsPdfDisclaimerText": "This document is for investment reference only.",
+  "fsPdfShareTextSuffix": "Financial Statements PDF",
+  "fsPdfPlatformNotSupportedText": "Saving PDF is not supported on this platform.",
+  "fsPdfFontLoadErrorText": "Failed to load PDF fonts.\nCheck assets/fonts/NotoSansKR-Regular.ttf\nCheck assets/fonts/NotoSansKR-Bold.ttf\nThen run flutter clean and try again.",
+  
+  "resultPdfInputSectionTitle": "Inputs",
+  "resultPdfResultSectionTitle": "Result",
+  "resultPdfRatingSummarySectionTitle": "Rating Summary",
+  "resultPdfFinancialSummarySectionTitle": "Financial Summary",
+  "resultPdfNoteSectionTitle": "Notes",
+
+  "resultPdfCurrentPriceLabel": "Current price",
+  "resultPdfEpsLabel": "EPS",
+  "resultPdfBpsLabel": "BPS",
+  "resultPdfDpsLabel": "DPS",
+  "resultPdfRequiredReturnLabel": "Required return r",
+
+  "resultPdfFairPriceLabel": "Fair price",
+  "resultPdfExpectedReturnLabel": "Expected return",
+  "resultPdfValuationStatusLabel": "Valuation status",
+  "resultPdfRoeLabel": "ROE",
+  "resultPdfDividendYieldLabel": "Dividend yield",
+  "resultPdfPerLabel": "PER",
+  "resultPdfPbrLabel": "PBR",
+
+  "resultPdfRatingLabel": "Rating",
+  "resultPdfFinancialBasisLabel": "Basis",
+  "resultPdfRevenueLabel": "Revenue",
+  "resultPdfOpIncomeLabel": "Operating income",
+  "resultPdfNetIncomeLabel": "Net income",
+  "resultPdfEquityLabel": "Equity",
+  "resultPdfLiabilitiesLabel": "Liabilities",
+  "resultPdfFinancialSourceLabel": "Financial source",
+
+  "resultPdfCalcUnavailablePrefix": "Calculation unavailable",
+  "resultPdfDisclaimerText": "This document is for investment reference only.",
+  "resultPdfShareTextSuffix": "PDF report",
+  "resultPdfPlatformNotSupportedText": "Saving PDF is not supported on this platform.",
+  "resultPdfFontLoadErrorText": "Failed to load PDF fonts.\n1) Check assets/fonts/NotoSansKR-Regular.ttf\n2) Check assets/fonts/NotoSansKR-Bold.ttf\n3) Register them in pubspec.yaml\n4) Run flutter clean and try again.",
+
+  "updateAvailableTitle": "An update is available",
+  "updateAvailableMessage": "A new version is ready. Would you like to update now?",
+  "updateLater": "Later",
+  "updateNow": "Update",
+  "updateAvailableBadge": "Update available",
+  "updateFromAbout": "Update",
+  "updateCheckInAboutHint": "You can continue the update from About.",
+  "updateAvailableMenuTitle": "Update available",
+  "updateAvailableMenuSubtitle": "A new version is available. Tap to update.",
+  "loadingApplyRankingSnapshot": "Applying ranking values"
+
+}

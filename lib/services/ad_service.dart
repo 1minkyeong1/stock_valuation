@@ -53,6 +53,8 @@ class AdService {
   static const String _iosInterstitialTest = 'ca-app-pub-3940256099942544/4411468910';
 
   String get bannerUnitId {
+    if (!_isSupportedAdPlatform || !adsEnabled) return '';
+
     if (_useTestAds) {
       return Platform.isAndroid ? _androidBannerTest : _iosBannerTest;
     }
@@ -61,6 +63,8 @@ class AdService {
   }
 
   String get interstitialUnitId {
+    if (!_isSupportedAdPlatform || !adsEnabled) return '';
+
     if (_useTestAds) {
       return Platform.isAndroid
           ? _androidInterstitialTest
@@ -73,6 +77,7 @@ class AdService {
   /// 앱 시작 시 1회 호출 권장
   void warmUp() {
     if (!adsEnabled) return;
+    if (!_isSupportedAdPlatform) return;
     _loadInterstitialIfNeeded();
   }
 
@@ -94,9 +99,15 @@ class AdService {
     return diff >= cooldownSeconds;
   }
 
+  bool get _isSupportedAdPlatform {
+    if (kIsWeb) return false;
+    return Platform.isAndroid || Platform.isIOS;
+  }
+
   /// 준비된 광고가 있을 때만 표시
   Future<void> maybeShowInterstitial() async {
     if (!adsEnabled) return;
+    if (!_isSupportedAdPlatform) return;
     if (!_isEligibleNow()) return;
 
     final ad = _interstitial;
@@ -139,6 +150,7 @@ class AdService {
 
   void _loadInterstitialIfNeeded() {
     if (!adsEnabled) return;
+    if (!_isSupportedAdPlatform) return;
     if (_interstitial != null) return;
     if (_loadingInterstitial) return;
 

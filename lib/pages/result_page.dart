@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:intl/intl.dart';
 
 import 'package:stock_valuation_app/models/market.dart';
 import 'package:stock_valuation_app/data/stores/repo_hub.dart';
@@ -26,17 +27,35 @@ import 'package:stock_valuation_app/utils/money_input_formatter.dart';
 import 'package:stock_valuation_app/pages/financial_statement_page.dart';
 import 'package:stock_valuation_app/pages/search_page.dart';
 import 'package:stock_valuation_app/utils/search_alias.dart';
+import 'package:stock_valuation_app/services/result_pdf_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:stock_valuation_app/l10n/app_localizations.dart';
+import 'package:stock_valuation_app/copy/result_copy.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
   final StockSearchItem item;
   final Market market;
 
+  // 랭킹에서 넘어온 스냅샷 값
+  final bool useRankingSnapshot;
+  final double? rankingPrice;
+  final double? rankingEps;
+  final double? rankingBps;
+  final double? rankingDps;
+  final double? rankingRPct;
+
   const ResultPage({
     super.key,
     required this.hub,
     required this.item,
     required this.market,
+    this.useRankingSnapshot = false,
+    this.rankingPrice,
+    this.rankingEps,
+    this.rankingBps,
+    this.rankingDps,
+    this.rankingRPct,
   });
 
   @override
@@ -46,6 +65,9 @@ class ResultPage extends StatefulWidget {
 class _ResultPageState extends State<ResultPage> {
 
   StockFundamentals? _fundamentals;
+
+  AppLocalizations get t => AppLocalizations.of(context)!;
+  bool get isKoLang => ResultCopy.isKo(context);
 
   // 상태
   bool _loading = true;
@@ -80,19 +102,28 @@ class _ResultPageState extends State<ResultPage> {
 
   // 고급보기 토글용 (true=고급/작은카드, false=초급/큰카드)
   bool _showAdvanced = true;
+  static const _kResultViewMode = 'result_view_mode_v1';
 
   String get _storeKey => "${widget.market.name}:${widget.item.code}";
   bool get _isUS => widget.market == Market.us;
 
   // 표시용(라벨)
-  String get _priceUnitText => _isUS ? r'현재가($)' : '현재가(원)';
+  String get _priceUnitText {
+    if (_isUS) {
+      return isKoLang ? r'현재가($)' : r'Current price ($)';
+    }
+    return isKoLang ? '현재가(원)' : 'Current price (KRW)';
+  }
 
-  // ✅ 결과/요약 표시용 포맷 (콤마/단위 일관성)
+  // 결과/요약 표시용 포맷 (콤마/단위 일관성)
   String _fmtMoney(num v) => _isUS ? fmtUsd(v) : fmtWon(v);
 
   // 가격 포맷터
   late final TextInputFormatter _priceFormatterKr;
   late final TextInputFormatter _priceFormatterUs;
+
+  // pdf
+  final _pdfService = ResultPdfService();
 
   // 로딩 단계 표시(디버깅/UX)
   String _stage = '';
@@ -109,22 +140,63 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 에러 영어 변환
+  String _valuationErrorText(Object e) {
+    if (e is ValuationException) {
+      switch (e.code) {
+        case ValuationErrorCode.invalidRequiredReturn:
+          return t.valuationErrorInvalidRequiredReturn;
+        case ValuationErrorCode.invalidPrice:
+          return t.valuationErrorInvalidPrice;
+        case ValuationErrorCode.invalidBps:
+          return t.valuationErrorInvalidBps;
+      }
+    }
+
+    final raw = e.toString();
+    if (raw.startsWith('Exception: ')) {
+      return raw.replaceFirst('Exception: ', '');
+    }
+    return raw;
+  }
+  
   // 미국티커 한글표시용
   String get _displayName {
-    if (!_isUS) return widget.item.name;
+    final locale = Localizations.localeOf(context);
 
-    final ko = SearchAlias.usPrimaryKoName(widget.item.code);
-    return ko ?? widget.item.name;
+    if (_isUS) {
+      if (locale.languageCode == 'ko') {
+        final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+        return ko ?? widget.item.name;
+      }
+      return widget.item.name;
+    }
+
+    return SearchAlias.displayKrName(
+      code: widget.item.code,
+      koName: widget.item.name,
+      locale: locale,
+    );
   }
 
-  String? get _originalUsName {
-    if (!_isUS) return null;
+  // 한글은 그대로 사용
+  String? get _originalDisplayName {
+    final locale = Localizations.localeOf(context);
 
-    final ko = SearchAlias.usPrimaryKoName(widget.item.code);
-    final en = widget.item.name.trim();
+    if (_isUS) {
+      if (locale.languageCode != 'ko') return null;
 
-    if (ko == null || en.isEmpty || ko == en) return null;
-    return en;
+      final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+      final en = widget.item.name.trim();
+      if (ko == null || en.isEmpty || ko == en) return null;
+      return en;
+    }
+
+    return SearchAlias.displayKrOriginalName(
+      code: widget.item.code,
+      koName: widget.item.name,
+      locale: locale,
+    );
   }
 
   // 기업 아이콘
@@ -159,6 +231,7 @@ class _ResultPageState extends State<ResultPage> {
     return (base + (ts - 1.0) * 10).clamp(base, max).toDouble();
   }
 
+  // 헤더 기업마크
   Widget _headerCompanyMark({double size = 40}) {
     final logoUrl = widget.item.logoUrl?.trim();
     final base = _isUS ? Colors.indigo : Colors.teal;
@@ -225,15 +298,23 @@ class _ResultPageState extends State<ResultPage> {
     _bpsCtrl = TextEditingController();
     _dpsCtrl = TextEditingController();
 
-    
-
-    // ✅ 가격 포맷터 준비
     _priceFormatterKr = MoneyInputFormatter(allowDecimal: false);
-    _priceFormatterUs = MoneyInputFormatter(allowDecimal: true, decimalDigits: 2);
+    _priceFormatterUs = MoneyInputFormatter(
+      allowDecimal: true,
+      decimalDigits: 2,
+    );
 
-    debugPrint('[ResultPage] initState item=${widget.item.code} market=${widget.market}');
+    debugPrint(
+      '[ResultPage] initState item=${widget.item.code} market=${widget.market}',
+    );
+
+    _loadViewMode();
     _loadFavState();
-    _load();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _load();
+    });
   }
 
   @override
@@ -262,12 +343,29 @@ class _ResultPageState extends State<ResultPage> {
     setState(() => _isFav = !_isFav);
   }
 
+  // 고급,초급보기 클릭 시 기억 저장
+  Future<void> _loadViewMode() async {
+    final sp = await SharedPreferences.getInstance();
+    final saved = sp.getBool(_kResultViewMode);
+
+    if (!mounted) return;
+    setState(() {
+      _showAdvanced = saved ?? true; // 저장값 없으면 기본은 고급보기
+    });
+  }
+  
+  Future<void> _saveViewMode() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kResultViewMode, _showAdvanced);
+  }
+
   // -----------------
   // View Toggle (눈 아이콘 / rating 카드 탭 / 미싱카드 탭 공통)
   // -----------------
   void _toggleViewMode() {
     if (!mounted) return;
     setState(() => _showAdvanced = !_showAdvanced);
+    unawaited(_saveViewMode()); // 바꾼 상태 저장
     debugPrint('[Toggle] showAdvanced=$_showAdvanced');
   }
 
@@ -333,7 +431,7 @@ class _ResultPageState extends State<ResultPage> {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("값을 다시 불러왔습니다.")),
+      SnackBar(content: Text(t.reloadedValues)),
     );
   }
 
@@ -356,13 +454,13 @@ class _ResultPageState extends State<ResultPage> {
 
     try {
       // 1) 가격
-      _setStage('가격 조회 시작');
+      _setStage(t.loadingPriceStart);
       Future<void> loadPrice() async {
         try {
           final quote = await widget.hub
               .getPriceQuote(widget.market, code)
               .timeout(const Duration(seconds: 8), onTimeout: () {
-            throw Exception('가격 조회 타임아웃(8s)');
+            throw Exception(t.loadingPriceTimeout);
           });
 
           price = quote.price;
@@ -375,13 +473,13 @@ class _ResultPageState extends State<ResultPage> {
       }
 
       // 2) 재무
-      _setStage('재무(EPS/BPS/DPS) 조회 시작');
+      _setStage(t.loadingFundamentalsStart);
       Future<void> loadFunda() async {
         try {
           f = await widget.hub
               .getFundamentals(widget.market, code, targetYear: null)
               .timeout(const Duration(seconds: 12), onTimeout: () {
-            throw Exception('재무 조회 타임아웃(12s)');
+            throw Exception(t.loadingFundamentalsTimeout);
           });
         } catch (e, st) {
           debugPrint('[ResultPage] fundamentals fail: $e\n$st');
@@ -393,49 +491,89 @@ class _ResultPageState extends State<ResultPage> {
       await Future.wait([loadPrice(), loadFunda()]);
 
       // 3) 초기값 반영
-      _setStage('초기값 반영');
+      _setStage(t.loadingApplyInitial);
+
+      // ✅ 랭킹에서 들어온 경우: 랭킹 계산값을 우선 적용
+      if (widget.useRankingSnapshot) {
+        final rp = widget.rankingPrice;
+        final re = widget.rankingEps;
+        final rb = widget.rankingBps;
+        final rd = widget.rankingDps;
+
+        if (rp != null && rp > 0) {
+          price = rp;
+        }
+
+        f = StockFundamentals(
+          eps: re ?? f.eps,
+          bps: rb ?? f.bps,
+          dps: rd ?? f.dps,
+          year: f.year,
+          basDt: f.basDt,
+          periodLabel: f.periodLabel,
+          fsDiv: f.fsDiv,
+          reprtCode: f.reprtCode,
+          fsSource: f.fsSource,
+          epsSource: f.epsSource,
+          bpsSource: f.bpsSource,
+          dpsSource: f.dpsSource,
+          epsLabel: f.epsLabel,
+          bpsLabel: f.bpsLabel,
+          dpsLabel: f.dpsLabel,
+        );
+      }
+
       _initPrice = price;
       _initF = f;
-      _initR = 5.0;
+
+      // ✅ 기본 5.0이 아니라, 랭킹에서 들어왔으면 랭킹 r 사용
+      _initR = widget.useRankingSnapshot
+          ? (widget.rankingRPct ?? 5.0)
+          : 5.0;
+
       rPct = _initR;
 
       _applyToTextFields(price: price, f: f);
 
       // 4) 저장값 복원
-      _setStage('저장값 복원');
-      final saved = await _inputStore.load(_storeKey).timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
-      );
+      // ✅ 랭킹에서 들어왔으면 저장값 복원 건너뜀
+      if (!widget.useRankingSnapshot) {
+        _setStage(t.loadingRestoreSaved);
+        final saved = await _inputStore.load(_storeKey).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => null,
+        );
 
-      final fd = _isUS ? 2 : 0;
+        final fd = _isUS ? 2 : 0;
 
-      if (saved != null) {
-        if (saved.eps != 0) {
-          _epsCtrl.text = _isUS
-              ? fmtUsdDecimal(saved.eps, fractionDigits: fd).replaceAll('\$', '')
-              : fmtWonDecimal(saved.eps, fractionDigits: fd);
+        if (saved != null) {
+          if (saved.eps != 0) {
+            _epsCtrl.text = _isUS
+                ? fmtUsdDecimal(saved.eps, fractionDigits: fd).replaceAll('\$', '')
+                : fmtWonDecimal(saved.eps, fractionDigits: fd);
+          }
+
+          if (saved.bps != 0) {
+            _bpsCtrl.text = _isUS
+                ? fmtUsdDecimal(saved.bps, fractionDigits: fd).replaceAll('\$', '')
+                : fmtWonDecimal(saved.bps, fractionDigits: fd);
+          }
+
+          if (saved.dps != 0) {
+            _dpsCtrl.text = _isUS
+                ? fmtUsdDecimal(saved.dps, fractionDigits: fd).replaceAll('\$', '')
+                : fmtWonDecimal(saved.dps, fractionDigits: fd);
+          }
+
+          rPct = saved.rPct;
         }
-
-        if (saved.bps != 0) {
-          _bpsCtrl.text = _isUS
-              ? fmtUsdDecimal(saved.bps, fractionDigits: fd).replaceAll('\$', '')
-              : fmtWonDecimal(saved.bps, fractionDigits: fd);
-        }
-
-        // DPS=0은 무배당일 수 있어 기존정책 유지 (0이면 덮어쓰기 안 함)
-        if (saved.dps != 0) {
-          _dpsCtrl.text = _isUS
-              ? fmtUsdDecimal(saved.dps, fractionDigits: fd).replaceAll('\$', '')
-              : fmtWonDecimal(saved.dps, fractionDigits: fd);
-        }
-
-        rPct = saved.rPct;
+      } else {
+        _setStage(t.loadingApplyRankingSnapshot);
       }
 
       if (!mounted) return;
 
-      _setStage('완료');
+      _setStage(t.loadingDone);
 
       setState(() {
         _priceBasDt = nextPriceBasDt;
@@ -458,14 +596,14 @@ class _ResultPageState extends State<ResultPage> {
 
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('네이버 페이지를 열 수 없습니다.')),
+        SnackBar(content: Text(t.naverOpenFailed)),
       );
       return;
     }
 
     if (mounted && _isUS) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('해외는 네이버 해외주식에서 티커로 검색해서 확인하세요.')),
+        SnackBar(content: Text(t.naverUsHint)),
       );
     }
   }
@@ -482,16 +620,16 @@ class _ResultPageState extends State<ResultPage> {
 
     final pl = f.periodLabel?.trim();
     if (pl != null && pl.isNotEmpty && pl != 'TTM') {
-      return '재무 기준: $pl';
+      return ResultCopy.financialBasisText(context, pl);
     }
 
     final bd = f.basDt?.trim();
     if (bd != null && bd.isNotEmpty) {
-      return '재무 기준일: ${_fmtBasDt(bd)}';
+      return ResultCopy.financialDateText(context, _fmtBasDt(bd));
     }
 
     if (f.year != null) {
-      return '재무 기준: ${f.year}년';
+      return ResultCopy.financialBasisText(context, '${f.year}');
     }
 
     return null;
@@ -560,34 +698,74 @@ class _ResultPageState extends State<ResultPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("$name 평가"),
+        title: Text(ResultCopy.pageTitle(context, name)),
         backgroundColor: _accent.withAlpha(18),
         elevation: 0,
         actions: [
-           IconButton(
-              tooltip: '검색',
-              icon: const Icon(Icons.search),
-              onPressed: _openSearch,  // 검색창 이동
-            ),
           IconButton(
+            tooltip: t.search,
+            icon: const Icon(Icons.search),
+            onPressed: _openSearch,
+            visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+          IconButton(
+            tooltip: t.favorite,
             icon: Icon(
               _isFav ? Icons.star : Icons.star_border,
               color: _isFav ? Colors.amber : null,
             ),
-            onPressed: _toggleFavorite, // 즐겨찾기
+            onPressed: _toggleFavorite,
+            visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
           IconButton(
-            tooltip: _showAdvanced ? "고급보기 숨기기" : "고급보기 보기",
-            icon: Icon(_showAdvanced ? Icons.visibility : Icons.visibility_off),
-            onPressed: _toggleViewMode, // 눈 아이콘 = 토글
+            tooltip: _showAdvanced ? t.hideAdvancedView : t.showAdvancedView,
+            icon: Icon(_showAdvanced ? Icons.visibility_off : Icons.visibility),
+            onPressed: _toggleViewMode,
+            visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _openNaverFinanceForCurrent,
-              style: TextButton.styleFrom(foregroundColor: _accent),
-              label: Text(widget.market == Market.kr ? 'N증권' : 'N해외검색'),
-            ),
+          PopupMenuButton<String>(
+            tooltip: t.moreMenu,
+            icon: const Icon(Icons.more_vert),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onSelected: (value) async {
+              switch (value) {
+                case 'naver':
+                  await _openNaverFinanceForCurrent();
+                  break;
+                case 'pdf':
+                  await _showPdfSaveSheet();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'naver',
+                child: Row(
+                  children: [
+                    const Icon(Icons.open_in_new),
+                    const SizedBox(width: 10),
+                    Text(_isUS ? t.openNaverGlobal : t.openNaverKr),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'pdf',
+                child: Row(
+                  children: [
+                    const Icon(Icons.picture_as_pdf_outlined),
+                    const SizedBox(width: 10),
+                    Text(t.savePdf),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -602,7 +780,7 @@ class _ResultPageState extends State<ResultPage> {
                 children: [
                   const CircularProgressIndicator(),
                   const SizedBox(height: 12),
-                  Text(_stage.isEmpty ? '로딩 중...' : _stage),
+                  Text(_stage.isEmpty ? t.loading : _stage),
                 ],
               ),
             )
@@ -616,9 +794,15 @@ class _ResultPageState extends State<ResultPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("불러오기 실패: $_error", style: const TextStyle(color: Colors.red)),
+          Text(
+            isKoLang ? "불러오기 실패: $_error" : "Load failed: $_error",
+            style: const TextStyle(color: Colors.red),
+          ),
           const SizedBox(height: 12),
-          ElevatedButton(onPressed: _load, child: const Text("다시 시도")),
+          ElevatedButton(
+            onPressed: _load,
+            child: Text(t.retry),
+          ),
         ],
       ),
     );
@@ -649,13 +833,17 @@ class _ResultPageState extends State<ResultPage> {
         ),
       );
     } catch (e) {
-      calcError = e.toString();
+      calcError = _valuationErrorText(e);
     }
 
     // 5단계 요약
     ValuationRating? rating;
     if (calcError == null && result != null) {
-      rating = ValuationService.interpret5(result, rPct);
+      rating = ValuationService.interpret5(
+        result,
+        rPct,
+        isKo: isKoLang,
+      );
     }
 
     return SafeArea(
@@ -725,10 +913,10 @@ class _ResultPageState extends State<ResultPage> {
                             "$name ($code) · $marketText",
                             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                           ),
-                          if (_originalUsName != null) ...[
+                          if (_originalDisplayName != null) ...[
                             const SizedBox(height: 4),
                             Text(
-                              "$_originalUsName",
+                              "$_originalDisplayName",
                               style: const TextStyle(fontSize: 12, color: Colors.grey),
                             ),
                           ],
@@ -739,31 +927,21 @@ class _ResultPageState extends State<ResultPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  (widget.market == Market.kr)
-                      ? "데이터 출처: 한국투자증권(KIS) 실시간 시세 + OpenDART 재무"
-                      : "데이터 출처: FMP (Financial Modeling Prep)",
+                  ResultCopy.dataSourceText(context, widget.market),
                   style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-
-                // if (f.periodLabel != null && f.periodLabel!.trim().isNotEmpty) ...[
-                //   const SizedBox(height: 6),
-                //   Text(
-                //     "재무 기준: ${f.periodLabel!}",
-                //     style: const TextStyle(fontSize: 12, color: Colors.grey),
-                //   ),
-                // ],
 
                 if (f.basDt != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    "재무 기준일: ${_fmtBasDt(f.basDt!)}",
+                    ResultCopy.financialDateText(context, _fmtBasDt(f.basDt!)),
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
                 if (_priceBasDt != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    "가격 기준일: ${_fmtBasDt(_priceBasDt!)}",
+                    ResultCopy.priceDateText(context, _fmtBasDt(_priceBasDt!)),
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -773,7 +951,7 @@ class _ResultPageState extends State<ResultPage> {
                   child: OutlinedButton.icon(
                     onPressed: _openFinancialStatementPage,
                     icon: const Icon(Icons.receipt_long, size: 18),
-                    label: const Text("재무제표 보기"),
+                    label: Text(t.viewFinancialStatements),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       minimumSize: const Size(0, 32),
@@ -806,23 +984,20 @@ class _ResultPageState extends State<ResultPage> {
     final usedPeriod = f.periodLabel?.trim();
     final usedFinanceText = (usedPeriod != null && usedPeriod.isNotEmpty)
         ? usedPeriod
-        : (f.year != null ? "${f.year}년" : null);
+        : (f.year != null ? '${f.year}' : null);
 
     final dpsZero = (dps == 0);
 
-    // ✅ 고급(true)=간단, 초급(false)=자세히
+    //  고급(true)=간단, 초급(false)=자세히
     final showDetail = !_showAdvanced;
 
-    final brief = "EPS/BPS 자동값이 비어 있습니다. (탭하면 보기 전환)";
-    final detail = (widget.market == Market.kr)
-        ? "현재 앱은 최신 사용가능 재무를 자동 선택해서 계산합니다.\n"
-          "${usedFinanceText != null ? "현재 사용 기준: $usedFinanceText\n" : ""}"
-          "최신 연간/분기 재무가 아직 공시되지 않았으면 직전 재무를 사용할 수 있어요.\n"
-          "${dpsZero ? "※ DPS=0은 무배당이거나(정상), 배당 데이터 미제공일 수 있어요.\n" : ""}"
-          "값을 직접 입력하면 즉시 재계산됩니다."
-        : "해당 값은 공시/배당 반영 타이밍 또는 API 제공 범위에 따라 비어 있을 수 있어요.\n"
-            "${dpsZero ? "※ DPS=0은 무배당(정상) 또는 데이터 미제공일 수 있어요.\n" : ""}"
-            "값을 직접 입력하면 즉시 재계산됩니다.";
+    final brief = ResultCopy.missingBrief(context);
+    final detail = ResultCopy.missingDetail(
+      context,
+      market: widget.market,
+      usedFinanceText: usedFinanceText,
+      dpsZero: dpsZero,
+    );
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -847,7 +1022,7 @@ class _ResultPageState extends State<ResultPage> {
                       children: [
                         Expanded(
                           child: Text(
-                            "데이터 미제공/계산불가: ${missing.join(', ')}",
+                            ResultCopy.missingTitle(context, missing),
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
@@ -868,8 +1043,24 @@ class _ResultPageState extends State<ResultPage> {
                         alignment: Alignment.centerLeft,
                         child: OutlinedButton.icon(
                           onPressed: _retryAutoValues,
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text("값 자동 재시도(새로고침)"),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: Size.zero,
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                            side: const BorderSide(width: 0.8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: const Icon(Icons.refresh, size: 14),
+                          label: Text(
+                            ResultCopy.retryAutoValuesLabel(context),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -886,134 +1077,227 @@ class _ResultPageState extends State<ResultPage> {
   // 텍스트박스 카드
   Widget _inputCard() {
     final priceFormatter = _isUS ? _priceFormatterUs : _priceFormatterKr;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Card(
-      color: _cInput.withAlpha(14),
       elevation: 0,
+      color: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: _cInput.withAlpha(55)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(160),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _cInput.withAlpha(35)),
-              ),
-              child: Row(
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surface.withAlpha(235),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
                 children: [
-                  const Expanded(
-                    child: Text("입력값", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Expanded(
+                    child: Text(
+                      ResultCopy.inputsTitle(context),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
                   TextButton(
                     onPressed: _resetToInitial,
-                    style: TextButton.styleFrom(foregroundColor: _cInput),
-                    child: const Text("초기화"),
+                    style: TextButton.styleFrom(
+                      foregroundColor: _cInput.withAlpha(210),
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(
+                      ResultCopy.resetLabel(context),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 10),
 
-            if (_parseDouble(_priceCtrl) == 0.0)
+              const SizedBox(height: 6),
+
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.red.withAlpha(18),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.red.withAlpha(60)),
-                ),
-                child: const Text(
-                  "현재가 데이터를 가져오지 못했습니다. 직접 입력해도 계산은 가능합니다.",
-                  style: TextStyle(fontSize: 12, color: Colors.red),
-                ),
+                height: 1,
+                color: cs.outlineVariant.withAlpha(70),
               ),
 
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-            // Price
-            LabeledNumberField(
-              key: const ValueKey('price_field'),
-              label: _priceUnitText,
-              controller: _priceCtrl,
-              onChanged: (_) => _onAnyInputChanged(),
-              inputFormatters: [priceFormatter],
-              hintText: "직접 입력 가능",
-            ),
-
-            const SizedBox(height: 8),
-
-            // EPS/BPS/DPS
-            MetricFieldWithBadge(
-              key: const ValueKey('eps_field'),
-              isUS: _isUS,
-              label: "EPS",
-              controller: _epsCtrl,
-              onChanged: (_) => _onAnyInputChanged(),
-            ),
-            const SizedBox(height: 8),
-
-            MetricFieldWithBadge(
-              key: const ValueKey('bps_field'),
-              isUS: _isUS,
-              label: "BPS",
-              controller: _bpsCtrl,
-              onChanged: (_) => _onAnyInputChanged(),
-            ),
-            const SizedBox(height: 8),
-
-            MetricFieldWithBadge(
-              key: const ValueKey('dps_field'),
-              isUS: _isUS,
-              label: "DPS",
-              controller: _dpsCtrl,
-              onChanged: (_) => _onAnyInputChanged(),
-            ),
-
-            // ✅ 재무 기준 힌트는 1번만
-            _metricHint(_metricLabel()),
-
-            const SizedBox(height: 14),
-            const Text("요구수익률 r(%)", style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text("r = ${rPct.toStringAsFixed(1)}%"),
-                const Text("(ROE/r로 적정 PBR 결정)", style: TextStyle(color: Colors.grey, fontSize: 12)),
+              if (_parseDouble(_priceCtrl) == 0.0) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withAlpha(16),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.withAlpha(45)),
+                  ),
+                  child: Text(
+                    ResultCopy.priceUnavailableHint(context),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.red,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
               ],
-            ),
 
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                activeTrackColor: _accent.withAlpha(200),
-                inactiveTrackColor: _accent.withAlpha(60),
-                thumbColor: _accent.withAlpha(220),
-                overlayColor: _accent.withAlpha(30),
-                valueIndicatorColor: _accent.withAlpha(220),
+              LabeledNumberField(
+                key: const ValueKey('price_field'),
+                label: _priceUnitText,
+                controller: _priceCtrl,
+                onChanged: (_) => _onAnyInputChanged(),
+                inputFormatters: [priceFormatter],
+                hintText: ResultCopy.manualInputHint(context),
               ),
-              child: Slider(
-                value: rPct,
-                min: 5,
-                max: 20,
-                divisions: 150,
-                label: "${rPct.toStringAsFixed(1)}%",
-                onChanged: (v) {
-                  setState(() => rPct = v);
-                  _scheduleSaveInputs();
-                },
+
+              const SizedBox(height: 6),
+
+              MetricFieldWithBadge(
+                key: const ValueKey('eps_field'),
+                isUS: _isUS,
+                label: "EPS",
+                controller: _epsCtrl,
+                onChanged: (_) => _onAnyInputChanged(),
               ),
-            ),
-          ],
+
+              const SizedBox(height: 6),
+
+              MetricFieldWithBadge(
+                key: const ValueKey('bps_field'),
+                isUS: _isUS,
+                label: "BPS",
+                controller: _bpsCtrl,
+                onChanged: (_) => _onAnyInputChanged(),
+              ),
+
+              const SizedBox(height: 6),
+
+              MetricFieldWithBadge(
+                key: const ValueKey('dps_field'),
+                isUS: _isUS,
+                label: "DPS",
+                controller: _dpsCtrl,
+                onChanged: (_) => _onAnyInputChanged(),
+              ),
+
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 2),
+                child: Text(
+                  _metricLabel() ?? '',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey[500],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                decoration: BoxDecoration(
+                  color: _accent.withAlpha(8),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _accent.withAlpha(28)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            ResultCopy.requiredReturnLabel(context),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(170),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: _accent.withAlpha(30)),
+                          ),
+                          child: Text(
+                            "r = ${rPct.toStringAsFixed(1)}%",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: _accent.withAlpha(220),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      ResultCopy.requiredReturnHelp(context),
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: _accent.withAlpha(200),
+                        inactiveTrackColor: _accent.withAlpha(55),
+                        thumbColor: _accent.withAlpha(220),
+                        overlayColor: _accent.withAlpha(28),
+                        valueIndicatorColor: _accent.withAlpha(220),
+                      ),
+                      child: Slider(
+                        value: rPct,
+                        min: 5,
+                        max: 20,
+                        divisions: 150,
+                        label: "${rPct.toStringAsFixed(1)}%",
+                        onChanged: (v) {
+                          setState(() => rPct = v);
+                          _scheduleSaveInputs();
+                        },
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          "5%",
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                        const Spacer(),
+                        Text(
+                          "20%",
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1123,7 +1407,7 @@ class _ResultPageState extends State<ResultPage> {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Text(
-            "아직 계산에 필요한 값이 부족해요. 입력값을 한 번 확인해 주세요.",
+            ResultCopy.calcNeedMoreValues(context),
             style: const TextStyle(color: Colors.red),
           ),
         ),
@@ -1138,20 +1422,22 @@ class _ResultPageState extends State<ResultPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("결과",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+           Text(
+              ResultCopy.resultTitleLabel(context),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
 
             // ✅ 초보 모드
             if (!_showAdvanced) ...[
-              // ✅ 두 KPI 박스 높이 자동 동일화 (고정 height 제거)
+              // 두 KPI 박스 높이 자동 동일화 (고정 height 제거)
               IntrinsicHeight(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Expanded(
                       child: _kpiBox(
-                        title: "적정주가",
+                        title: ResultCopy.fairPriceLabel(context),
                         value: _fmtMoney(r.fairPrice),
                         subtitle: "BPS × (ROE / r)",
                       ),
@@ -1159,12 +1445,12 @@ class _ResultPageState extends State<ResultPage> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: _kpiBox(
-                        title: "기대수익률(%)",
+                        title: ResultCopy.expectedReturnPctLabel(context),
                         value:
                             "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
                         valueColor:
                             r.expectedReturnPct >= 0 ? Colors.green : Colors.red,
-                        subtitle: "적정가까지 상승 여지",
+                        subtitle: ResultCopy.expectedReturnHint(context),
                       ),
                     ),
                   ],
@@ -1173,48 +1459,47 @@ class _ResultPageState extends State<ResultPage> {
 
               const SizedBox(height: 10),
 
-              // ✅ 게이지
+              // 게이지
               _priceFairGauge(price: currentPrice, fairPrice: r.fairPrice),
 
               const SizedBox(height: 10),
 
-              // ✅ 게이지 아래 문구(항상 보이게)
+              // 게이지 아래 문구(항상 보이게)
               Text(
-                "현황평가: ${r.gapPct.toStringAsFixed(1)}%  (100% 미만이면 저평가 쪽)",
+                ResultCopy.valuationStatusText(context, r.gapPct),
                 style: TextStyle(color: Colors.grey[700], fontSize: 12),
               ),
               const SizedBox(height: 6),
-              const Text(
-                "※ 상단 눈 아이콘을 켜면 ROE, 배당수익률, PER/PBR 등 상세 지표를 볼 수 있어요.",
-                style: TextStyle(fontSize: 12),
+              Text(
+                ResultCopy.detailHintText(context),
+                style: const TextStyle(fontSize: 12),
               ),
             ],
 
-            // ✅ 고급 모드(기존 그대로)
+            // ✅ 고급 모드
             if (_showAdvanced) ...[
-              _sectionCard("가치(Valuation)", [
+              _sectionCard(ResultCopy.valueSectionTitle(context), [
                 _metricTile(
-                  label: "적정주가",
+                  label: ResultCopy.fairPriceLabel(context),
                   value: _fmtMoney(r.fairPrice),
                   helper: "BPS × (ROE / r)",
                   icon: Icons.price_check,
                 ),
                 _metricTile(
-                  label: "현황평가(현재/적정)",
+                  label: ResultCopy.valuationStatusLabel(context),
                   value: "${r.gapPct.toStringAsFixed(1)}%",
-                  helper: "100% 미만이면 저평가 쪽",
+                  helper: ResultCopy.valuationStatusHelper(context),
                   icon: Icons.bar_chart,
                 ),
                 _metricTile(
-                  label: "기대수익률",
-                  value:
-                      "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
-                  helper: "적정가까지 상승 여지",
+                  label: ResultCopy.expectedReturnPctLabel(context),
+                  value: "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
+                  helper: ResultCopy.expectedReturnHint(context),
                   icon: Icons.trending_up,
                 ),
               ]),
               const SizedBox(height: 8),
-              _sectionCard("수익성(Profitability)", [
+              _sectionCard(ResultCopy.profitabilitySectionTitle(context), [
                 _metricTile(
                   label: "ROE",
                   value: "${r.roePct.toStringAsFixed(2)}%",
@@ -1224,21 +1509,21 @@ class _ResultPageState extends State<ResultPage> {
                 _metricTile(
                   label: "ROE / r",
                   value: r.roeOverR.toStringAsFixed(2),
-                  helper: "1.0 이상이면 r 충족",
+                  helper: ResultCopy.roeOverRHelper(context),
                   icon: Icons.functions,
                 ),
               ]),
               const SizedBox(height: 8),
-              _sectionCard("배당(Dividend)", [
+              _sectionCard(ResultCopy.dividendSectionTitle(context), [
                 _metricTile(
-                  label: "배당수익률",
+                  label: ResultCopy.dividendYieldLabel(context),
                   value: "${r.dividendYieldPct.toStringAsFixed(2)}%",
-                  helper: "DPS / 현재가",
+                  helper: isKoLang ? "DPS / 현재가" : "DPS / current price",
                   icon: Icons.savings,
                 ),
               ]),
               const SizedBox(height: 8),
-              _sectionCard("멀티플(Multiples)", [
+              _sectionCard(ResultCopy.multiplesSectionTitle(context), [
                 _metricTile(
                     label: "PER",
                     value: r.per.toStringAsFixed(2),
@@ -1279,7 +1564,7 @@ class _ResultPageState extends State<ResultPage> {
           ),
           const SizedBox(height: 8),
 
-          // ✅ 값은 길면 자동 축소(한 줄 유지)
+          // 값은 길면 자동 축소(한 줄 유지)
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -1318,9 +1603,9 @@ class _ResultPageState extends State<ResultPage> {
           border: Border.all(color: _cInfo.withAlpha(60)),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Text(
-          "현재가/적정가를 표시하려면 현재가와 적정가가 필요해요.",
-          style: TextStyle(fontSize: 12),
+        child: Text(
+          ResultCopy.needCurrentAndFairPrice(context),
+          style: const TextStyle(fontSize: 12),
         ),
       );
     }
@@ -1357,7 +1642,7 @@ class _ResultPageState extends State<ResultPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "현재가 / 적정주가: ${pct.toStringAsFixed(1)}%",
+           ResultCopy.currentVsFairText(context, pct),
             style: const TextStyle(fontWeight: FontWeight.bold),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -1404,11 +1689,11 @@ class _ResultPageState extends State<ResultPage> {
 
           const SizedBox(height: 8),
 
-          // ✅ 0 / 100 / 200: 좌/중/우 정렬 고정
+          // 0 / 100 / 200: 좌/중/우 정렬 고정
           clampScale(
             Row(
-              children: const [
-                Expanded(
+              children: [
+                const Expanded(
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: Text("0%", style: TextStyle(fontSize: 12)),
@@ -1417,10 +1702,10 @@ class _ResultPageState extends State<ResultPage> {
                 Expanded(
                   child: Align(
                     alignment: Alignment.center,
-                    child: Text("100%(적정)", style: TextStyle(fontSize: 12)),
+                    child: Text(ResultCopy.fairAt100Label(context), style: const TextStyle(fontSize: 12)),
                   ),
                 ),
-                Expanded(
+                const Expanded(
                   child: Align(
                     alignment: Alignment.centerRight,
                     child: Text("200%", style: TextStyle(fontSize: 12)),
@@ -1433,7 +1718,7 @@ class _ResultPageState extends State<ResultPage> {
 
           const SizedBox(height: 6),
 
-          // ✅ 현재가/적정가: 좌/우 정렬 + 길면 축소
+          // 현재가/적정가: 좌/우 정렬 + 길면 축소
           clampScale(
             Row(
               children: [
@@ -1444,7 +1729,7 @@ class _ResultPageState extends State<ResultPage> {
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        "현재가: ${_fmtMoney(price)}",
+                        ResultCopy.currentPriceText(context, _fmtMoney(price)),
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
@@ -1458,7 +1743,7 @@ class _ResultPageState extends State<ResultPage> {
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerRight,
                       child: Text(
-                        "적정가: ${_fmtMoney(fairPrice)}",
+                        ResultCopy.fairPriceText(context, _fmtMoney(fairPrice)),
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
@@ -1553,33 +1838,12 @@ class _ResultPageState extends State<ResultPage> {
     if (calcError != null || result == null) return const SizedBox.shrink();
 
     final gap = result.gapPct;
-    final over = gap >= 130;
-    final under = gap <= 90;
+    final copy = ResultCopy.sellGuide(context, gap);
 
-    String title;
-    String subtitle;
-    IconData icon;
-    Color c;
-
-    if (over) {
-      title = "보유/매도 점검(참고) · 과열 주의";
-      subtitle =
-          "현재가가 적정가 대비 ${gap.toStringAsFixed(0)}% 높습니다. 내재가치보다 비싼 구간이니, 수익을 확정할지 아니면 기업의 초과 성장을 더 믿고 기다릴지 결정이 필요한 시점입니다.";
-      icon = Icons.warning_amber;
-      c = Colors.orange;
-    } else if (under) {
-      title = "보유/매도 점검(참고) · 안전마진 유효";
-      subtitle =
-          "현재가가 적정가 대비 ${gap.toStringAsFixed(0)}% 낮아 안전마진이 충분합니다. 시세 흔들림에 불안해하기보다, 기업의 이익 성장세와 사업의 본질이 변하지 않았는지 확인하며 보유하세요.";
-      icon = Icons.fact_check;
-      c = Colors.blueGrey;
-    } else {
-      title = "보유/매도 점검(참고) · 가치 부합";
-      subtitle =
-          "현재 주가가 기업의 내재가치에 근접했습니다. 이제부터는 가격의 싸고 비쌈을 따지기보다, 기업의 '해자(경쟁력)'나 '경영진의 태도' 등 질적인 변화를 더 세밀하게 관찰해야 합니다.";
-      icon = Icons.checklist;
-      c = Colors.indigo;
-    }
+    final title = copy.title;
+    final subtitle = copy.subtitle;
+    final icon = copy.icon;
+    final c = copy.color;
 
     return Card(
       elevation: 0,
@@ -1605,16 +1869,44 @@ class _ResultPageState extends State<ResultPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: c)),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: c,
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[700],
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: OutlinedButton.icon(
                         onPressed: () => _openSellGuideSheet(gapPct: gap),
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text("체크리스트 보기"),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          side: const BorderSide(width: 0.8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        icon: const Icon(Icons.open_in_new, size: 14),
+                        label: Text(
+                          ResultCopy.checklistLabel(context),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -1642,6 +1934,519 @@ class _ResultPageState extends State<ResultPage> {
         );
       },
     );
+  }
+
+  // pdf
+  Future<void> _showPdfSaveSheet() async {
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withAlpha(120),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    ResultCopy.pdfExportTitle(context),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${_displayName} (${widget.item.code})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _pdfSheetTile(
+                  icon: Icons.assessment_outlined,
+                  title: ResultCopy.pdfSaveResultTitle(context),
+                  subtitle: ResultCopy.pdfSaveResultSubtitle(context),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _saveResultPdf();
+                  },
+                ),
+                _pdfSheetTile(
+                  icon: Icons.picture_as_pdf_outlined,
+                  title: ResultCopy.pdfSaveFullTitle(context),
+                  subtitle: ResultCopy.pdfSaveFullSubtitle(context),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _saveFullPdf();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _pdfSheetTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _accent.withAlpha(55)),
+              color: _accent.withAlpha(10),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: _accent.withAlpha(18),
+                    child: Icon(icon, color: _accent.withAlpha(220)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(Icons.chevron_right, color: _accent.withAlpha(220)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String? _buildPdfMetaText({StockFinancialDetails? details}) {
+    final f = _fundamentals ?? _initF;
+    final lines = <String>[];
+
+    final metricHint = _metricLabel();
+    if (metricHint != null && metricHint.trim().isNotEmpty) {
+      lines.add(metricHint);
+    }
+
+    if (_priceBasDt != null) {
+      lines.add(ResultCopy.priceDateText(context, _fmtBasDt(_priceBasDt!)));
+    }
+
+    if (_isUS && details != null) {
+      final currency = _reportedCurrencyOf(details);
+      if (currency.isNotEmpty) {
+        lines.add(isKoLang ? '보고 통화: $currency' : 'Reporting currency: $currency');
+      }
+    }
+
+    if (f.fsSource != null && f.fsSource!.trim().isNotEmpty) {
+      lines.add(t.financialSourceLabel(f.fsSource!));
+    }
+
+    return lines.isEmpty ? null : lines.join('\n');
+  }
+
+  String _pdfMetricText(double v) {
+    return _isUS
+        ? fmtUsdDecimal(v, fractionDigits: 2)
+        : fmtWonDecimal(v, fractionDigits: 0);
+  }
+
+  String _pdfFsText(num? v) {
+    if (v == null) return '-';
+    return _fmtMoney(v);
+  }
+
+  String _reportedCurrencyOf(StockFinancialDetails d) {
+    final code = (d.reportedCurrency ?? '').trim().toUpperCase();
+    return code.isEmpty ? 'USD' : code;
+  }
+
+  String _fmtRawPdfMoney(num? v, {required String currencyCode}) {
+    if (v == null) return '-';
+
+    final text = NumberFormat('#,##0', 'en_US').format(v);
+    final code = currencyCode.trim().toUpperCase();
+
+    switch (code) {
+      case 'USD':
+        return '\$$text';
+      case 'KRW':
+        return '₩$text';
+      case 'CNY':
+      case 'RMB':
+        return 'RMB $text';
+      case 'JPY':
+        return '¥$text';
+      case 'EUR':
+        return 'EUR $text';
+      default:
+        return '$code $text';
+    }
+  }
+
+  String _pdfMoneyWithUsdRef(num? raw, StockFinancialDetails? d) {
+    if (raw == null) return '-';
+
+    if (!_isUS || d == null) {
+      return _pdfFsText(raw);
+    }
+
+    final currency = _reportedCurrencyOf(d);
+    final rawText = _fmtRawPdfMoney(raw, currencyCode: currency);
+    final rate = d.fxRateToUsd;
+
+    if (currency == 'USD' || rate == null || rate <= 0) {
+      return rawText;
+    }
+
+    final usd = raw.toDouble() * rate;
+    final usdText = _fmtRawPdfMoney(usd, currencyCode: 'USD');
+
+    return '$rawText\n${isKoLang ? 'USD 환산 참고값: $usdText' : 'USD reference value: $usdText'}';
+  }
+
+  Future<void> _saveResultPdf() async {
+    try {
+      final price = _parseDouble(_priceCtrl);
+      final eps = _parseDouble(_epsCtrl);
+      final bps = _parseDouble(_bpsCtrl);
+      final dps = _parseDouble(_dpsCtrl);
+
+      ValuationResult? result;
+      String? calcError;
+
+      try {
+        result = ValuationService.evaluate(
+          ValuationInput(
+            price: price,
+            eps: eps,
+            bps: bps,
+            dps: dps,
+            rPct: rPct,
+          ),
+        );
+      } catch (e) {
+        calcError = _valuationErrorText(e);
+      }
+
+      ValuationRating? rating;
+      if (calcError == null && result != null) {
+        rating = ValuationService.interpret5(
+          result,
+          rPct,
+          isKo: isKoLang,
+        );
+      }
+
+      final labels = ResultPdfLabels(
+        inputSectionTitle: t.resultPdfInputSectionTitle,
+        resultSectionTitle: t.resultPdfResultSectionTitle,
+        ratingSummarySectionTitle: t.resultPdfRatingSummarySectionTitle,
+        financialSummarySectionTitle: t.resultPdfFinancialSummarySectionTitle,
+        noteSectionTitle: t.resultPdfNoteSectionTitle,
+
+        currentPriceLabel: t.resultPdfCurrentPriceLabel,
+        epsLabel: t.resultPdfEpsLabel,
+        bpsLabel: t.resultPdfBpsLabel,
+        dpsLabel: t.resultPdfDpsLabel,
+        requiredReturnLabel: t.resultPdfRequiredReturnLabel,
+
+        fairPriceLabel: t.resultPdfFairPriceLabel,
+        expectedReturnLabel: t.resultPdfExpectedReturnLabel,
+        valuationStatusLabel: t.resultPdfValuationStatusLabel,
+        roeLabel: t.resultPdfRoeLabel,
+        dividendYieldLabel: t.resultPdfDividendYieldLabel,
+        perLabel: t.resultPdfPerLabel,
+        pbrLabel: t.resultPdfPbrLabel,
+
+        ratingLabel: t.resultPdfRatingLabel,
+        financialBasisLabel: t.resultPdfFinancialBasisLabel,
+        revenueLabel: t.resultPdfRevenueLabel,
+        opIncomeLabel: t.resultPdfOpIncomeLabel,
+        netIncomeLabel: t.resultPdfNetIncomeLabel,
+        equityLabel: t.resultPdfEquityLabel,
+        liabilitiesLabel: t.resultPdfLiabilitiesLabel,
+        financialSourceLabel: t.resultPdfFinancialSourceLabel,
+
+        calcUnavailablePrefix: t.resultPdfCalcUnavailablePrefix,
+        disclaimerText: t.resultPdfDisclaimerText,
+        shareTextSuffix: t.resultPdfShareTextSuffix,
+        platformNotSupportedText: t.resultPdfPlatformNotSupportedText,
+        fontLoadErrorText: t.resultPdfFontLoadErrorText,
+      );
+
+      final data = ResultPdfData(
+        name: _displayName,
+        originalName: _originalDisplayName,
+        code: widget.item.code,
+        marketText: widget.market == Market.kr ? 'KR' : 'US',
+        sourceText: widget.market == Market.kr
+            ? (isKoLang
+                ? '출처: OpenDART 재무 + KIS 시세'
+                : 'Source: OpenDART financials + KIS quotes')
+            : (isKoLang
+                ? '출처: FMP(제공 범위에 따라 값이 비어 있을 수 있음)'
+                : 'Source: FMP (some values may be empty depending on coverage)'),
+        metaText: _buildPdfMetaText(),
+        includeEvaluation: true,
+        includeFinancials: false,
+        currentPriceText: _fmtMoney(price),
+        epsText: _pdfMetricText(eps),
+        bpsText: _pdfMetricText(bps),
+        dpsText: _pdfMetricText(dps),
+        rPctText: '${rPct.toStringAsFixed(1)}%',
+        fairPriceText: result != null ? _fmtMoney(result.fairPrice) : null,
+        expectedReturnText: result != null
+            ? '${result.expectedReturnPct >= 0 ? '+' : ''}${result.expectedReturnPct.toStringAsFixed(1)}%'
+            : null,
+        gapText: result != null ? '${result.gapPct.toStringAsFixed(1)}%' : null,
+        roeText: result != null ? '${result.roePct.toStringAsFixed(2)}%' : null,
+        dividendYieldText: result != null
+            ? '${result.dividendYieldPct.toStringAsFixed(2)}%'
+            : null,
+        perText: result != null ? result.per.toStringAsFixed(2) : null,
+        pbrText: result != null ? result.pbr.toStringAsFixed(2) : null,
+        ratingTitle: rating?.title,
+        ratingSummary: rating?.summary,
+        calcError: calcError,
+        financialPeriodText: null,
+        revenueText: null,
+        opIncomeText: null,
+        netIncomeText: null,
+        equityText: null,
+        liabilitiesText: null,
+        fsSourceText: null,
+        labels: labels,
+      );
+
+      final savedPath = await _pdfService.savePdf(data);
+
+      if (!mounted) return;
+
+      if (savedPath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ResultCopy.pdfCanceled(context))),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ResultCopy.pdfStartedResult(context))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ResultCopy.pdfFailed(context, e))),
+      );
+    }
+  }
+
+  Future<void> _saveFullPdf() async {
+    try {
+      final details = await widget.hub.getFinancialDetails(
+        widget.market,
+        widget.item.code,
+        targetYear: null,
+      );
+
+      final price = _parseDouble(_priceCtrl);
+      final eps = _parseDouble(_epsCtrl);
+      final bps = _parseDouble(_bpsCtrl);
+      final dps = _parseDouble(_dpsCtrl);
+
+      ValuationResult? result;
+      String? calcError;
+
+      try {
+        result = ValuationService.evaluate(
+          ValuationInput(
+            price: price,
+            eps: eps,
+            bps: bps,
+            dps: dps,
+            rPct: rPct,
+          ),
+        );
+      } catch (e) {
+        calcError = _valuationErrorText(e);
+      }
+
+      ValuationRating? rating;
+      if (calcError == null && result != null) {
+        rating = ValuationService.interpret5(
+          result,
+          rPct,
+          isKo: isKoLang,
+        );
+      }
+
+      final f = details.current;
+
+      String financialPeriodText = '-';
+      if ((f.periodLabel ?? '').trim().isNotEmpty) {
+        financialPeriodText = f.periodLabel!.trim();
+      } else if ((f.basDt ?? '').trim().isNotEmpty) {
+        financialPeriodText = _fmtBasDt(f.basDt!);
+      } else if (f.year != null) {
+        financialPeriodText = '${f.year}';
+      }
+
+      final labels = ResultPdfLabels(
+        inputSectionTitle: t.resultPdfInputSectionTitle,
+        resultSectionTitle: t.resultPdfResultSectionTitle,
+        ratingSummarySectionTitle: t.resultPdfRatingSummarySectionTitle,
+        financialSummarySectionTitle: t.resultPdfFinancialSummarySectionTitle,
+        noteSectionTitle: t.resultPdfNoteSectionTitle,
+
+        currentPriceLabel: t.resultPdfCurrentPriceLabel,
+        epsLabel: t.resultPdfEpsLabel,
+        bpsLabel: t.resultPdfBpsLabel,
+        dpsLabel: t.resultPdfDpsLabel,
+        requiredReturnLabel: t.resultPdfRequiredReturnLabel,
+
+        fairPriceLabel: t.resultPdfFairPriceLabel,
+        expectedReturnLabel: t.resultPdfExpectedReturnLabel,
+        valuationStatusLabel: t.resultPdfValuationStatusLabel,
+        roeLabel: t.resultPdfRoeLabel,
+        dividendYieldLabel: t.resultPdfDividendYieldLabel,
+        perLabel: t.resultPdfPerLabel,
+        pbrLabel: t.resultPdfPbrLabel,
+
+        ratingLabel: t.resultPdfRatingLabel,
+        financialBasisLabel: t.resultPdfFinancialBasisLabel,
+        revenueLabel: t.resultPdfRevenueLabel,
+        opIncomeLabel: t.resultPdfOpIncomeLabel,
+        netIncomeLabel: t.resultPdfNetIncomeLabel,
+        equityLabel: t.resultPdfEquityLabel,
+        liabilitiesLabel: t.resultPdfLiabilitiesLabel,
+        financialSourceLabel: t.resultPdfFinancialSourceLabel,
+
+        calcUnavailablePrefix: t.resultPdfCalcUnavailablePrefix,
+        disclaimerText: t.resultPdfDisclaimerText,
+        shareTextSuffix: t.resultPdfShareTextSuffix,
+        platformNotSupportedText: t.resultPdfPlatformNotSupportedText,
+        fontLoadErrorText: t.resultPdfFontLoadErrorText,
+      );
+
+      final data = ResultPdfData(
+        name: _displayName,
+        originalName: _originalDisplayName,
+        code: widget.item.code,
+        marketText: widget.market == Market.kr ? 'KR' : 'US',
+        sourceText: widget.market == Market.kr
+            ? (isKoLang
+                ? '출처: OpenDART 재무 + KIS 시세'
+                : 'Source: OpenDART financials + KIS quotes')
+            : (isKoLang
+                ? '출처: FMP(제공 범위에 따라 값이 비어 있을 수 있음)'
+                : 'Source: FMP (some values may be empty depending on coverage)'),
+        metaText: _buildPdfMetaText(details: details),
+        includeEvaluation: true,
+        includeFinancials: true,
+        currentPriceText: _fmtMoney(price),
+        epsText: _pdfMetricText(eps),
+        bpsText: _pdfMetricText(bps),
+        dpsText: _pdfMetricText(dps),
+        rPctText: '${rPct.toStringAsFixed(1)}%',
+        fairPriceText: result != null ? _fmtMoney(result.fairPrice) : null,
+        expectedReturnText: result != null
+            ? '${result.expectedReturnPct >= 0 ? '+' : ''}${result.expectedReturnPct.toStringAsFixed(1)}%'
+            : null,
+        gapText: result != null ? '${result.gapPct.toStringAsFixed(1)}%' : null,
+        roeText: result != null ? '${result.roePct.toStringAsFixed(2)}%' : null,
+        dividendYieldText: result != null
+            ? '${result.dividendYieldPct.toStringAsFixed(2)}%'
+            : null,
+        perText: result != null ? result.per.toStringAsFixed(2) : null,
+        pbrText: result != null ? result.pbr.toStringAsFixed(2) : null,
+        ratingTitle: rating?.title,
+        ratingSummary: rating?.summary,
+        calcError: calcError,
+        financialPeriodText: financialPeriodText,
+        revenueText: _pdfMoneyWithUsdRef(details.revenue ?? f.revenue, details),
+        opIncomeText: _pdfMoneyWithUsdRef(details.opIncome ?? f.opIncome, details),
+        netIncomeText: _pdfMoneyWithUsdRef(details.netIncome ?? f.netIncome, details),
+        equityText: _pdfMoneyWithUsdRef(details.equity ?? f.equity, details),
+        liabilitiesText: _pdfMoneyWithUsdRef(details.liabilities ?? f.liabilities, details),
+        fsSourceText: (f.fsSource ?? '').trim().isEmpty ? '-' : f.fsSource,
+        labels: labels,
+      );
+
+      final savedPath = await _pdfService.savePdf(data);
+
+      if (!mounted) return;
+
+      if (savedPath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ResultCopy.pdfCanceled(context))),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ResultCopy.pdfStartedFull(context))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ResultCopy.pdfFailed(context, e))),
+      );
+    }
   }
 
   // 재무제표 페이지 이동

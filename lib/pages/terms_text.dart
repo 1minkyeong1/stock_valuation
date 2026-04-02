@@ -1,5 +1,12 @@
+import 'package:flutter/widgets.dart';
+
 class TermsText {
-  static const String content = '''
+  static String content(BuildContext context) {
+    final isKo = Localizations.localeOf(context).languageCode == 'ko';
+    return isKo ? _ko : _en;
+  }
+
+  static const String _ko = '''
 [이용약관]
 
 제1조(목적)
@@ -28,5 +35,44 @@ class TermsText {
 
 부칙
 본 약관은 2026-04-01부터 적용됩니다.
+''';
+
+  static const String _en = '''
+[Terms of Service]
+
+Article 1 (Purpose)
+These Terms of Service set forth the rights, obligations, and responsibilities
+between the provider (the “Company”) and users in relation to the use of
+the Stock Fair Value Calculator app (the “Service”).
+
+Article 2 (Definitions)
+1. “Service” refers to the mobile application and related features provided by the Company.
+2. “User” refers to a person who uses the Service in accordance with these Terms.
+
+Article 3 (Effect and Changes of the Terms)
+The Company may revise these Terms to the extent permitted by applicable laws.
+Any changes may be announced through notices within the App or through updates.
+
+Article 4 (Provision and Changes of the Service)
+The Company may change the contents of the Service
+(including features, UI, and data delivery methods)
+when necessary for operational or technical reasons.
+
+Article 5 (Disclaimer)
+1. The Service does not constitute investment advice, and the provided information is for reference only.
+2. The Company is not liable for damages caused by reasons beyond its control,
+including issues with external data providers or network failures.
+3. Users are solely responsible for their own investment decisions and outcomes.
+
+Article 6 (Intellectual Property Rights)
+All rights to the Service and related works belong to the Company.
+
+Article 7 (Governing Law and Jurisdiction)
+These Terms are governed by the laws of the Republic of Korea,
+and any disputes shall be resolved by the court with jurisdiction
+under the Civil Procedure Act of Korea.
+
+Supplementary Provision
+These Terms take effect on 2026-04-01.
 ''';
 }

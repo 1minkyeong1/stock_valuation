@@ -15,18 +15,18 @@ class StockInputs {
   });
 
   Map<String, dynamic> toJson() => {
-    'eps': eps,
-    'bps': bps,
-    'dps': dps,
-    'rPct': rPct,
-  };
+        'eps': eps,
+        'bps': bps,
+        'dps': dps,
+        'rPct': rPct,
+      };
 
   static StockInputs fromJson(Map<String, dynamic> m) => StockInputs(
-    eps: (m['eps'] as num).toDouble(),
-    bps: (m['bps'] as num).toDouble(),
-    dps: (m['dps'] as num).toDouble(),
-    rPct: (m['rPct'] as num).toDouble(),
-  );
+        eps: ((m['eps'] ?? 0) as num).toDouble(),
+        bps: ((m['bps'] ?? 0) as num).toDouble(),
+        dps: ((m['dps'] ?? 0) as num).toDouble(),
+        rPct: ((m['rPct'] ?? 5.0) as num).toDouble(),
+      );
 }
 
 class StockInputStore {
@@ -61,5 +61,21 @@ class StockInputStore {
     final all = await _loadAll();
     all.remove(key);
     await _saveAll(all);
+  }
+
+  // ✅ 백업용: 전체 raw export
+  Future<Map<String, dynamic>> exportAllRaw() async {
+    final all = await _loadAll();
+    return Map<String, dynamic>.from(all);
+  }
+
+  // ✅ 백업용: 전체 raw replace
+  Future<void> replaceAllRaw(Map<String, dynamic> all) async {
+    await _saveAll(Map<String, dynamic>.from(all));
+  }
+
+  // ✅ 선택: 전체 삭제
+  Future<void> clearAll() async {
+    await _saveAll({});
   }
 }

@@ -36,6 +36,13 @@ class StockFundamentals {
   final String? reprtCode;   // "11014"(3Q) / "11011"(FY) 등
   final String? fsSource;    // 예: "OpenDART fnlttSinglAcntAll"
 
+  // ✅ 재무제표 PDF용
+  final num? revenue;
+  final num? opIncome;
+  final num? netIncome;
+  final num? equity;
+  final num? liabilities;
+
 
   const StockFundamentals({
     required this.eps,
@@ -53,6 +60,11 @@ class StockFundamentals {
     this.fsDiv,
     this.reprtCode,
     this.fsSource,
+    this.revenue,
+    this.opIncome,
+    this.netIncome,
+    this.equity,
+    this.liabilities,
   });
 }
 
@@ -71,6 +83,9 @@ class YearMetric {
 
 class StockFinancialDetails {
   final StockFundamentals current;
+
+  final String? reportedCurrency;  // 통화
+  final double? fxRateToUsd; // 1 reporting currency = ? USD
 
   // 현재 재무 원본 요약
   final num? revenue;        // 매출액
@@ -94,6 +109,8 @@ class StockFinancialDetails {
 
   const StockFinancialDetails({
     required this.current,
+    this.reportedCurrency,
+    this.fxRateToUsd,
     this.revenue,
     this.opIncome,
     this.netIncome,

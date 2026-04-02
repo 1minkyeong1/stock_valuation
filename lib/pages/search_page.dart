@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:stock_valuation_app/data/repository/stock_repository.dart';
@@ -12,8 +14,13 @@ import 'package:stock_valuation_app/services/ad_service.dart';
 import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/models/market.dart';
 import 'package:stock_valuation_app/utils/search_alias.dart';
+import 'package:stock_valuation_app/pages/ranking_page.dart';
 import 'about_page.dart';
-import '../pages/ranking_page.dart';
+
+import 'package:stock_valuation_app/services/app_backup_service.dart';
+import 'package:stock_valuation_app/services/app_backup_file_service.dart';
+import 'package:stock_valuation_app/l10n/app_localizations.dart';
+
 
 class SearchPage extends StatefulWidget {
  final RepoHub hub;
@@ -40,6 +47,31 @@ class _SearchPageState extends State<SearchPage> {
 
   final _recentStore = RecentStore();
   List<StockSearchItem> _recents = [];
+
+  final _backupService = AppBackupService();
+  final _backupFileService = AppBackupFileService();
+
+  // 번역
+  AppLocalizations get t => AppLocalizations.of(context)!;
+
+  String _backupErrorText(Object e) {
+    if (e is AppBackupException) {
+      switch (e.code) {
+        case AppBackupErrorCode.invalidFormat:
+          return t.backupErrorInvalidFormat;
+        case AppBackupErrorCode.wrongApp:
+          return t.backupErrorWrongApp;
+        case AppBackupErrorCode.unsupportedVersion:
+          return t.backupErrorUnsupportedVersion;
+      }
+    }
+
+    final raw = e.toString();
+    if (raw.startsWith('Exception: ')) {
+      return raw.replaceFirst('Exception: ', '');
+    }
+    return raw;
+  }
 
  @override
   void initState() {
@@ -117,7 +149,7 @@ class _SearchPageState extends State<SearchPage> {
     _searchSeq++;
     final int mySeq = _searchSeq;
 
-    // ✅ 조합이 끝날 때까지 기다렸다가 자동검색 실행
+    // 조합이 끝날 때까지 기다렸다가 자동검색 실행
     void schedule(int waitMs, int attemptsLeft) {
       _debounce?.cancel();
       _debounce = Timer(Duration(milliseconds: waitMs), () {
@@ -134,7 +166,7 @@ class _SearchPageState extends State<SearchPage> {
           return;
         }
 
-        // ✅ 조합이 끝났거나(또는 너무 오래 조합이면) 검색 실행
+        // 조합이 끝났거나(또는 너무 오래 조합이면) 검색 실행
         _runSearch(keyword: latest, mySeq: mySeq);
       });
     }
@@ -167,9 +199,9 @@ class _SearchPageState extends State<SearchPage> {
     return RegExp(r'^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$').hasMatch(t);
   }
 
-  // =========================
+  // =============================
   // ✅ 검색: 돋보기/엔터로 즉시 검색
-  // =========================
+  // =============================
   Future<void> _runSearch({String? keyword, int? mySeq}) async {
     _debounce?.cancel();
 
@@ -187,7 +219,7 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
 
-    // ✅ 자동검색이면 mySeq 유지, 수동검색이면 새 seq 발급
+    // 자동검색이면 mySeq 유지, 수동검색이면 새 seq 발급
     final int seq = mySeq ?? (++_searchSeq);
 
     if (!mounted) return;
@@ -232,7 +264,7 @@ class _SearchPageState extends State<SearchPage> {
           setState(() {
             _loading = false;
             _results = [];
-            _error = "국내 종목으로 보입니다. ‘국내’ 탭에서 검색해 주세요.";
+            _error = t.searchTabLooksKrGuide;
           });
           FocusScope.of(context).requestFocus(_searchFocus);
           return;
@@ -312,7 +344,7 @@ class _SearchPageState extends State<SearchPage> {
   // US 거래소로 분류
   String _displayMarketText(StockSearchItem s) {
     final market = s.market.trim();
-    if (market.isEmpty) return _isUsItem(s) ? 'US' : '-';
+    if (market.isEmpty) return _isUsItem(s) ? t.marketUs : t.marketUnknown;
     return market;
   }
 
@@ -374,7 +406,7 @@ class _SearchPageState extends State<SearchPage> {
     } catch (e, st) {
       debugPrint('[OpenResult] push error: $e\n$st');
       if (!mounted) return;
-      setState(() => _error = '상세화면 이동 실패: $e');
+      setState(() => _error = t.detailPageOpenFailed('$e'));
       return;
     }
 
@@ -411,11 +443,17 @@ class _SearchPageState extends State<SearchPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("최근 검색 삭제"),
-        content: Text("${s.name}(${s.code}) 를 최근 검색에서 삭제할까요?"),
+        title: Text(t.recentDeleteTitle),
+        content: Text(t.recentDeleteConfirm(s.name, s.code)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("취소")),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("삭제")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(t.cancel),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(t.delete),
+          ),
         ],
       ),
     );
@@ -424,7 +462,7 @@ class _SearchPageState extends State<SearchPage> {
       await _recentStore.remove(_tab, s.code);
       await _loadRecents();
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text("${s.name} 삭제됨")));
+      messenger.showSnackBar(SnackBar(content: Text(t.deletedItem(s.name))));
     }
   }
 
@@ -435,11 +473,17 @@ class _SearchPageState extends State<SearchPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("최근 검색 전체 삭제"),
-        content: const Text("최근 검색 목록을 모두 삭제할까요?"),
+        title: Text(t.clearRecentTitle),
+        content: Text(t.clearRecentConfirm),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("취소")),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("삭제")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(t.cancel),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(t.delete),
+          ),
         ],
       ),
     );
@@ -451,7 +495,7 @@ class _SearchPageState extends State<SearchPage> {
       await _loadRecents();
       if (!context.mounted) return;
 
-      messenger.showSnackBar(const SnackBar(content: Text("최근 검색을 모두 삭제했습니다.")));
+      messenger.showSnackBar( SnackBar(content: Text(t.recentCleared)));
     }
   }
 
@@ -462,11 +506,17 @@ class _SearchPageState extends State<SearchPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("즐겨찾기 삭제"),
-        content: Text("${s.name}(${s.code}) 를 즐겨찾기에서 삭제할까요?"),
+        title: Text(t.favoritesDeleteTitle),
+        content: Text(t.favoritesDeleteConfirm(s.name, s.code)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("취소")),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("삭제")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(t.cancel),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(t.delete),
+          ),
         ],
       ),
     );
@@ -478,7 +528,7 @@ class _SearchPageState extends State<SearchPage> {
       await _loadFav();
       if (!context.mounted) return;
 
-      messenger.showSnackBar(SnackBar(content: Text("${s.name} 삭제됨")));
+      messenger.showSnackBar(SnackBar(content: Text(t.deletedItem(s.name))));
     }
   }
 
@@ -489,11 +539,17 @@ class _SearchPageState extends State<SearchPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("즐겨찾기 전체 삭제"),
-        content: const Text("즐겨찾기 목록을 모두 삭제할까요?"),
+        title: Text(t.clearFavoritesTitle),
+        content: Text(t.clearFavoritesConfirm),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("취소")),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("삭제")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(t.cancel),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(t.delete),
+          ),
         ],
       ),
     );
@@ -505,7 +561,7 @@ class _SearchPageState extends State<SearchPage> {
       await _loadFav();
       if (!context.mounted) return;
 
-      messenger.showSnackBar(const SnackBar(content: Text("즐겨찾기를 모두 삭제했습니다.")));
+      messenger.showSnackBar(SnackBar(content: Text(t.favoritesCleared)));
     }
   }
 
@@ -548,9 +604,9 @@ class _SearchPageState extends State<SearchPage> {
         children: [
           Expanded(
             child: SegmentedButton<Market>(
-              segments: const [
-                ButtonSegment(value: Market.kr, label: Text("국내")),
-                ButtonSegment(value: Market.us, label: Text("미국")),
+              segments: [
+                ButtonSegment(value: Market.kr, label: Text(t.tabKr)),
+                ButtonSegment(value: Market.us, label: Text(t.tabUs)),
               ],
               selected: {_tab},
               style: ButtonStyle(
@@ -582,20 +638,41 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   String _displayItemName(StockSearchItem s) {
-    if (!_isUsItem(s)) return s.name;
+    final locale = Localizations.localeOf(context);
 
-    final ko = SearchAlias.usPrimaryKoName(s.code);
-    return ko ?? s.name;
+    if (_isUsItem(s)) {
+      if (locale.languageCode == 'ko') {
+        final ko = SearchAlias.usPrimaryKoName(s.code);
+        return ko ?? s.name;
+      }
+      return s.name;
+    }
+
+    return SearchAlias.displayKrName(
+      code: s.code,
+      koName: s.name,
+      locale: locale,
+    );
   }
 
   String? _displayItemOriginalName(StockSearchItem s) {
-    if (!_isUsItem(s)) return null;
+    final locale = Localizations.localeOf(context);
 
-    final ko = SearchAlias.usPrimaryKoName(s.code);
-    final en = s.name.trim();
+    if (_isUsItem(s)) {
+      if (locale.languageCode != 'ko') return null;
 
-    if (ko == null || en.isEmpty || ko == en) return null;
-    return en;
+      final ko = SearchAlias.usPrimaryKoName(s.code);
+      final en = s.name.trim();
+
+      if (ko == null || en.isEmpty || ko == en) return null;
+      return en;
+    }
+
+    return SearchAlias.displayKrOriginalName(
+      code: s.code,
+      koName: s.name,
+      locale: locale,
+    );
   }
 
   // alisa 결과에도 로고 넣기 함수
@@ -727,7 +804,7 @@ class _SearchPageState extends State<SearchPage> {
         const Spacer(),
         if (onClear != null)
           IconButton(
-            tooltip: clearTooltip ?? "전체 삭제",
+            tooltip: clearTooltip ?? t.deleteAll,
             onPressed: onClear,
             icon: const Icon(Icons.delete_outline),
           ),
@@ -816,7 +893,7 @@ class _SearchPageState extends State<SearchPage> {
             const Spacer(),
             clampScale(
               Text(
-                '평가보기',
+                t.viewValuation,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -939,10 +1016,8 @@ class _SearchPageState extends State<SearchPage> {
   //  검색창
   Widget _searchBox({bool compact = false}) {
     final hint = compact
-        ? (_tab == Market.kr ? "종목명/코드" : "티커")
-        : (_tab == Market.kr
-            ? "국내 종목명 또는 코드 (예: 삼성전자 / 005930)"
-            : "미국 티커 (예: AAPL / TSLA)");
+    ? (_tab == Market.kr ? t.searchPageCompactHintKr : t.searchPageCompactHintUs)
+    : (_tab == Market.kr ? t.searchPageHintKr : t.searchPageHintUs);
 
     return _leftAccentCard(
       color: _accent,
@@ -990,7 +1065,7 @@ class _SearchPageState extends State<SearchPage> {
                   suffixIcon: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // ✅ 지우기 "자리"는 항상 유지(없으면 투명 + 터치 막기)
+                      // 지우기 "자리"는 항상 유지(없으면 투명 + 터치 막기)
                       SizedBox(
                         width: btnSize,
                         height: btnSize,
@@ -999,7 +1074,7 @@ class _SearchPageState extends State<SearchPage> {
                           child: Opacity(
                             opacity: hasText ? 1.0 : 0.0,
                             child: IconButton(
-                              tooltip: "지우기",
+                              tooltip: t.clearButton,
                               onPressed: _clearSearch,
                               icon: Icon(Icons.close, color: Colors.grey[700], size: compact ? 18 : 22),
                               padding: EdgeInsets.zero,
@@ -1009,9 +1084,9 @@ class _SearchPageState extends State<SearchPage> {
                         ),
                       ),
 
-                      // ✅ 검색(돋보기)은 항상 같은 자리(맨 오른쪽)
+                      // 검색(돋보기)은 항상 같은 자리(맨 오른쪽)
                       IconButton(
-                        tooltip: "검색",
+                        tooltip: t.searchButton,
                         onPressed: hasText ? _runSearch : null,
                         icon: Icon(Icons.search, color: _accent.withAlpha(235), size: compact ? 22 : 26),
                         padding: EdgeInsets.zero,
@@ -1041,7 +1116,7 @@ class _SearchPageState extends State<SearchPage> {
             },
           ),
 
-          // ✅ 세로모드에서만 배너 보여줌(가로모드는 공간 확보)
+          // 세로모드에서만 배너 보여줌(가로모드는 공간 확보)
           if (!compact) ...[
             const SizedBox(height: 10),
             Container(
@@ -1058,7 +1133,7 @@ class _SearchPageState extends State<SearchPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      "자동검색이 되며, 필요하면 오른쪽 돋보기로 즉시 검색할 수 있어요.",
+                      t.autoSearchHelp,
                       style: TextStyle(color: Colors.grey[800], fontSize: 12),
                     ),
                   ),
@@ -1082,13 +1157,13 @@ class _SearchPageState extends State<SearchPage> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: isLand ? 48 : null,
-        title: const Text(
-          "종목 검색",
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+       title: Text(
+          t.searchPageTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
         ),
         actions: [
           IconButton(
-            tooltip: '저평가 기업',
+            tooltip: t.rankingPageTitle,
             style: const ButtonStyle(
               backgroundColor: WidgetStatePropertyAll(Colors.transparent),
               overlayColor: WidgetStatePropertyAll(Colors.transparent),
@@ -1105,21 +1180,58 @@ class _SearchPageState extends State<SearchPage> {
               );
             },
           ),
-          IconButton(
-            tooltip: '앱 정보',
-            style: const ButtonStyle(
-              backgroundColor: WidgetStatePropertyAll(Colors.transparent),
-              overlayColor: WidgetStatePropertyAll(Colors.transparent),
-              shadowColor: WidgetStatePropertyAll(Colors.transparent),
-              surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
-            ),
-            icon: const Icon(Icons.error_outline),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AboutPage()),
-              );
+          PopupMenuButton<String>(
+            tooltip: t.moreMenu,
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              switch (value) {
+                case 'backup_export':
+                  await _exportBackupToFile();
+                  break;
+                case 'backup_import':
+                  await _importBackupFromFile();
+                  break;
+                case 'about':
+                  if (!mounted) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AboutPage()),
+                  );
+                  break;
+              }
             },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'backup_export',
+                child: Row(
+                  children: [
+                    const Icon(Icons.upload_file),
+                    const SizedBox(width: 10),
+                    Text(t.backupExport),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'backup_import',
+                child: Row(
+                  children: [
+                    const Icon(Icons.download),
+                    const SizedBox(width: 10),
+                    Text(t.backupImport),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'about',
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline),
+                    const SizedBox(width: 10),
+                    Text(t.aboutApp),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1174,43 +1286,53 @@ class _SearchPageState extends State<SearchPage> {
       children: [
         if (_recents.isNotEmpty) ...[
           _sectionHeader(
-            title: "최근 검색",
+            title: t.recentSearches,
             onClear: _confirmClearRecents,
-            clearTooltip: "최근 검색 전체 삭제",
+            clearTooltip: t.recentSearchesDeleteAllTooltip,
             badgeColor: Colors.orange,
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: stripH,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: _recents.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final s = _recents[i];
-                return _stockMiniCard(
-                  s,
-                  onLongPress: () => _confirmDeleteRecent(s),
-                );
+          ScrollConfiguration(
+            behavior: const MaterialScrollBehavior().copyWith(
+              dragDevices: {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.stylus,
+                PointerDeviceKind.trackpad,
               },
+            ),
+            child: SizedBox(
+              height: stripH,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const ClampingScrollPhysics(),
+                itemCount: _recents.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final s = _recents[i];
+                  return _stockMiniCard(
+                    s,
+                    onLongPress: () => _confirmDeleteRecent(s),
+                  );
+                },
+              ),
             ),
           ),
           const SizedBox(height: 14),
         ] else ...[
           _emptyHintCard(
             icon: Icons.history,
-            title: "최근 검색이 없어요",
-            desc: "위에서 종목명을 검색해보세요. 검색 기록이 여기에 쌓입니다.",
+            title: t.recentSearchesEmptyTitle,
+            desc: t.recentSearchesEmptyDesc,
           ),
           const SizedBox(height: 12),
         ],
 
         if (_favorites.isNotEmpty) ...[
           _sectionHeader(
-            title: "즐겨찾기",
+            title: t.favorites,
             onClear: _confirmClearFavorites,
-            clearTooltip: "즐겨찾기 전체 삭제",
+            clearTooltip: t.favoritesDeleteAllTooltip,
             badgeColor: Colors.purple,
           ),
           const SizedBox(height: 8),
@@ -1227,8 +1349,8 @@ class _SearchPageState extends State<SearchPage> {
         ] else ...[
           _emptyHintCard(
             icon: Icons.star_border,
-            title: "즐겨찾기가 비어 있어요",
-            desc: "종목 평가 화면에서 ⭐ 버튼을 누르면 여기에 모아볼 수 있어요.",
+            title: t.favoritesEmptyTitle,
+            desc: t.favoritesEmptyDesc,
           ),
         ],
 
@@ -1249,17 +1371,15 @@ class _SearchPageState extends State<SearchPage> {
         _looksLikeUsTicker(mapped) && !SearchAlias.looksLikeKrCode(mapped);
 
     final emptyDesc = (_tab == Market.kr)
-        ? (looksTicker
-            ? "국내에서 결과가 없으면 ‘미국’ 탭에서 티커로도 검색해보세요."
-            : "종목명/코드를 다시 확인해보세요.")
-        : "티커를 다시 확인해보세요.";
+        ? (looksTicker ? t.emptySearchDescKrTryUs : t.emptySearchDescKrCheck)
+        : t.emptySearchDescUsCheck;
 
     // 결과 없고 로딩도 아니면: 빈 안내 카드만 보여주기
     if (_results.isEmpty && !_loading) {
       return SliverToBoxAdapter(
         child: _emptyHintCard(
           icon: Icons.search_off,
-          title: "검색 결과가 없어요",
+          title: t.emptySearchTitle,
           desc: emptyDesc,
         ),
       );
@@ -1316,6 +1436,88 @@ class _SearchPageState extends State<SearchPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _exportBackupToFile() async {
+    try {
+      final jsonText = await _backupService.exportJson();
+
+      final labels = AppBackupFileLabels.defaults(
+        isKo: Localizations.localeOf(context).languageCode == 'ko',
+      );
+
+      final savedPath = await _backupFileService.saveBackupFile(
+        jsonText,
+        labels: labels,
+      );
+
+      if (!mounted) return;
+
+      if (savedPath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(t.exportBackupCanceled)),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.exportBackupCreated(savedPath))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.exportBackupFailed('$e'))),
+      );
+    }
+  }
+
+  Future<void> _importBackupFromFile() async {
+    try {
+      final jsonText = await _backupFileService.pickBackupFileAndRead();
+
+      if (jsonText == null || jsonText.trim().isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(t.importBackupCanceled)),
+        );
+        return;
+      }
+
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(t.importBackupTitle),
+          content: Text(t.importBackupConfirm),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t.cancel),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t.importButton),
+            ),
+          ],
+        ),
+      );
+
+      if (ok != true) return;
+
+      await _backupService.importJson(jsonText, overwrite: true);
+
+      await _loadFav();
+      await _loadRecents();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.importBackupSuccess)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.importBackupFailed(_backupErrorText(e)))),
+      );
+    }
   }
 
   // =========================

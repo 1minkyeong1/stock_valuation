@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import 'package:stock_valuation_app/models/market.dart';
 import 'package:stock_valuation_app/data/stores/repo_hub.dart';
 import 'package:stock_valuation_app/data/repository/stock_repository.dart';
 import 'package:stock_valuation_app/utils/number_format.dart';
 import 'package:stock_valuation_app/utils/search_alias.dart';
+import 'package:stock_valuation_app/services/financial_statement_pdf_service.dart';
+import 'package:stock_valuation_app/copy/financial_statement_copy.dart';
+import 'package:stock_valuation_app/l10n/app_localizations.dart';
+
 
 class FinancialStatementPage extends StatefulWidget {
   final RepoHub hub;
@@ -33,9 +38,14 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
 
   StockFinancialDetails? _details;
 
+  // 번역
+  AppLocalizations get t => AppLocalizations.of(context)!;
+  bool get isKoLang => FinancialStatementCopy.isKo(context);
+
+  final _financialPdfService = FinancialStatementPdfService();
+
   Timer? _slowHintTimer;
   bool _showSlowHint = false;
-
 
   @override
   void initState() {
@@ -107,20 +117,41 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
   bool get _isUS => widget.market == Market.us;
 
   String get _displayName {
-    if (!_isUS) return widget.item.name;
+    final locale = Localizations.localeOf(context);
 
-    final ko = SearchAlias.usPrimaryKoName(widget.item.code);
-    return ko ?? widget.item.name;
+    if (_isUS) {
+      if (locale.languageCode == 'ko') {
+        final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+        return ko ?? widget.item.name;
+      }
+      return widget.item.name;
+    }
+
+    return SearchAlias.displayKrName(
+      code: widget.item.code,
+      koName: widget.item.name,
+      locale: locale,
+    );
   }
 
-  String? get _originalUsName {
-    if (!_isUS) return null;
+  String? get _originalDisplayName {
+    final locale = Localizations.localeOf(context);
 
-    final ko = SearchAlias.usPrimaryKoName(widget.item.code);
-    final en = widget.item.name.trim();
+    if (_isUS) {
+      if (locale.languageCode != 'ko') return null;
 
-    if (ko == null || en.isEmpty || ko == en) return null;
-    return en;
+      final ko = SearchAlias.usPrimaryKoName(widget.item.code);
+      final en = widget.item.name.trim();
+
+      if (ko == null || en.isEmpty || ko == en) return null;
+      return en;
+    }
+
+    return SearchAlias.displayKrOriginalName(
+      code: widget.item.code,
+      koName: widget.item.name,
+      locale: locale,
+    );
   }
 
   bool get _isLand => MediaQuery.of(context).orientation == Orientation.landscape;
@@ -136,6 +167,56 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     return _isKR ? fmtWon(v) : fmtUsd(v);
   }
 
+  String _reportedCurrencyOf(StockFinancialDetails d) {
+    final code = (d.reportedCurrency ?? '').trim().toUpperCase();
+    return code.isEmpty ? 'USD' : code;
+  }
+
+  String _fmtRawStatementMoney(num? v, {required String currencyCode}) {
+    if (v == null) return '-';
+
+    final text = NumberFormat('#,##0', 'en_US').format(v);
+    final code = currencyCode.trim().toUpperCase();
+
+    switch (code) {
+      case 'USD':
+        return '\$$text';
+      case 'KRW':
+        return '₩$text';
+      case 'CNY':
+      case 'RMB':
+        return 'RMB $text';
+      case 'JPY':
+        return '¥$text';
+      case 'EUR':
+        return 'EUR $text';
+      default:
+        return '$code $text';
+    }
+  }
+
+  String _reportedCurrencyText(String currencyCode) {
+    return isKoLang
+        ? '보고 통화: $currencyCode'
+        : 'Reporting currency: $currencyCode';
+  }
+
+  String? _usdReferenceText(num? raw, StockFinancialDetails d) {
+    if (!_isUS || raw == null) return null;
+
+    final currency = _reportedCurrencyOf(d);
+    final rate = d.fxRateToUsd;
+
+    if (currency == 'USD' || rate == null || rate <= 0) return null;
+
+    final usd = raw.toDouble() * rate;
+    final usdText = _fmtRawStatementMoney(usd, currencyCode: 'USD');
+
+    return isKoLang
+        ? 'USD 환산 참고값: $usdText'
+        : 'USD reference value: $usdText';
+  }
+
   String _metaLine(StockFundamentals f) {
     final parts = <String>[];
 
@@ -143,7 +224,9 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     if (pl != null && pl.isNotEmpty) parts.add(pl);
 
     final bd = f.basDt?.trim();
-    if (bd != null && bd.isNotEmpty) parts.add("기준일 ${_fmtBasDt(bd)}");
+    if (bd != null && bd.isNotEmpty) {
+      parts.add(FinancialStatementCopy.metaDate(context, _fmtBasDt(bd)));
+    }
 
     return parts.join(" · ");
   }
@@ -158,13 +241,18 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          "$name 재무제표",
+          FinancialStatementCopy.pageTitle(context, name),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
           IconButton(
-            tooltip: "새로고침",
+            tooltip: FinancialStatementCopy.pdfSaveTooltip(context),
+            onPressed: _saveFinancialStatementPdf,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+          ),
+          IconButton(
+            tooltip: FinancialStatementCopy.reloadTooltip(context),
             onPressed: _loading ? null : _reload,
             icon: const Icon(Icons.refresh),
           ),
@@ -185,11 +273,14 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text("불러오기 실패: $_error", style: const TextStyle(color: Colors.red)),
+        Text(
+          FinancialStatementCopy.loadFailed(context, _error ?? '-'),
+          style: const TextStyle(color: Colors.red),
+        ),
         const SizedBox(height: 12),
         ElevatedButton(
           onPressed: _reload,
-          child: const Text("다시 시도"),
+          child: Text(FinancialStatementCopy.retry(context)),
         ),
       ],
     );
@@ -207,14 +298,14 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
                 const Center(child: CircularProgressIndicator()),
                 if (_showSlowHint) ...[
                   const SizedBox(height: 14),
-                  const Text(
-                    "재무제표 계산 중...",
-                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                  Text(
+                    FinancialStatementCopy.loadingHint(context),
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
                   ),
                 ],
               ],
             )
-          : const Center(child: Text("데이터가 없습니다."));
+          : Center(child: Text(FinancialStatementCopy.noData(context)));
     }
 
     final hasAny = details?.revenue != null ||
@@ -256,20 +347,20 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     return Card(
       elevation: 0,
       color: Colors.grey.withAlpha(18),
-      child: const Padding(
-        padding: EdgeInsets.all(14),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            SizedBox(
+            const SizedBox(
               width: 16,
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
-                "재무제표 계산 중...",
-                style: TextStyle(fontSize: 13, color: Colors.black87),
+                FinancialStatementCopy.loadingHint(context),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
               ),
             ),
           ],
@@ -303,10 +394,10 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (_originalUsName != null) ...[
+                  if (_originalDisplayName != null) ...[
                     const TextSpan(text: " · "),
                     TextSpan(
-                      text: _originalUsName!,
+                      text: _originalDisplayName!,
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -321,9 +412,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              widget.market == Market.kr
-                  ? "출처: OpenDART 재무 + KIS 시세"
-                  : "출처: FMP(제공 범위에 따라 값이 비어 있을 수 있음)",
+              FinancialStatementCopy.sourceText(context, widget.market),
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
             if (meta.isNotEmpty) ...[
@@ -345,9 +434,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Text(
-          "재무 원본 금액(매출/영업이익/순이익/자본총계/부채총계)을 가져오지 못했습니다.\n"
-          "공시 반영 전이거나(승인/갱신 대기), 항목명이 달라 파싱이 실패했을 수 있어요.\n\n"
-          "우측 상단 새로고침을 눌러 다시 시도해보세요.",
+          FinancialStatementCopy.emptyHint(context),
           style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
       ),
@@ -355,6 +442,19 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
   }
 
   Widget _fsSummaryCard(StockFinancialDetails d) {
+    final rawCurrency = _isUS ? _reportedCurrencyOf(d) : 'KRW';
+
+    String rawMoney(num? v) {
+      if (_isKR) return _fmtMoney(v);
+      return _fmtRawStatementMoney(v, currencyCode: rawCurrency);
+    }
+
+    // String helperWithUsdRef(String base, num? raw) {
+    //   final ref = _usdReferenceText(raw, d);
+    //   if (ref == null) return base;
+    //   return '$base\n$ref';
+    // }
+
     return Card(
       elevation: 0,
       child: Padding(
@@ -362,40 +462,52 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("재무 요약(원본)", style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              FinancialStatementCopy.fsSummaryTitle(context),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            if (_isUS)
+              Text(
+                _reportedCurrencyText(rawCurrency),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
             const SizedBox(height: 10),
-            _row("매출", _fmtMoney(d.revenue), helper: "손익계산서"),
-            _row("영업이익", _fmtMoney(d.opIncome), helper: "손익계산서"),
-            _row("순이익", _fmtMoney(d.netIncome), helper: "EPS 계산 근거"),
-            _row("자본총계", _fmtMoney(d.equity), helper: "BPS 계산 근거"),
-            _row("부채총계", _fmtMoney(d.liabilities), helper: "재무상태표"),
+            _row(
+              FinancialStatementCopy.revenue(context),
+              rawMoney(d.revenue),
+              helper: FinancialStatementCopy.incomeStatement(context),
+              valueSub: _usdReferenceText(d.revenue, d),
+            ),
+            _row(
+              FinancialStatementCopy.opIncome(context),
+              rawMoney(d.opIncome),
+              helper: FinancialStatementCopy.incomeStatement(context),
+              valueSub: _usdReferenceText(d.opIncome, d),
+            ),
+            _row(
+              FinancialStatementCopy.netIncome(context),
+              rawMoney(d.netIncome),
+              helper: FinancialStatementCopy.epsBasis(context),
+              valueSub: _usdReferenceText(d.netIncome, d),
+            ),
+            _row(
+              FinancialStatementCopy.equity(context),
+              rawMoney(d.equity),
+              helper: FinancialStatementCopy.bpsBasis(context),
+              valueSub: _usdReferenceText(d.equity, d),
+            ),
+            _row(
+              FinancialStatementCopy.liabilities(context),
+              rawMoney(d.liabilities),
+              helper: FinancialStatementCopy.balanceSheet(context),
+              valueSub: _usdReferenceText(d.liabilities, d),
+            ),
           ],
         ),
       ),
     );
   }
-
-  // Widget _epsBpsDpsCard(StockFundamentals f) {
-  //   String fmtMetric(num v) =>
-  //       _isKR ? fmtWonDecimal(v, fractionDigits: 0) : fmtUsdDecimal(v, fractionDigits: 2);
-
-  //   return Card(
-  //     elevation: 0,
-  //     child: Padding(
-  //       padding: const EdgeInsets.all(14),
-  //       child: Column(
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: [
-  //           const Text("현재 계산에 사용된 값", style: TextStyle(fontWeight: FontWeight.bold)),
-  //           const SizedBox(height: 10),
-  //           _row("EPS", fmtMetric(f.eps)),
-  //           _row("BPS", fmtMetric(f.bps)),
-  //           _row("DPS", fmtMetric(f.dps)),
-  //         ],
-  //       ),
-  //     ),
-  //   );
-  // }
 
   String _fmtMetricValue(num? v) {
     if (v == null) return '-';
@@ -505,7 +617,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "${e.year}년",
+                FinancialStatementCopy.yearLabel(context, e.year),
                 style: TextStyle(
                   fontSize: 11,
                   color: Colors.grey[700],
@@ -536,20 +648,20 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("버핏식 보조 지표", style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(FinancialStatementCopy.buffettAssistTitle(context), style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: _miniMetricCard(
-                    title: "3년 평균 EPS",
+                    title: FinancialStatementCopy.avg3yEps(context),
                     value: _fmtMetricValue(d.epsAvg3y),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _miniMetricCard(
-                    title: "5년 평균 ROE",
+                    title: FinancialStatementCopy.avg5yRoe(context),
                     value: _fmtPercent(d.roeAvg5y),
                   ),
                 ),
@@ -570,15 +682,15 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("장기 추이", style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(FinancialStatementCopy.trendTitle(context), style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 13),
 
-            _subSectionTitle("연도별 EPS"),
+            _subSectionTitle(FinancialStatementCopy.yearlyEps(context)),
             _historyWrap(d.epsHistory, _fmtMetricValue),
 
             const SizedBox(height: 16),
 
-            _subSectionTitle("연도별 ROE"),
+            _subSectionTitle(FinancialStatementCopy.yearlyRoe(context)),
             _historyWrap(d.roeHistory, (v) => _fmtPercent(v is num ? v.toDouble() : null)),
           ],
         ),
@@ -589,13 +701,15 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
   // 안정성 카드
   Widget _stabilityCard(StockFinancialDetails d) {
     String lossText() {
-      if (d.lossYears.isEmpty) return '없음';
-      return d.lossYears.map((e) => '$e년').join(', ');
+      if (d.lossYears.isEmpty) return FinancialStatementCopy.none(context);
+      return d.lossYears.map((e) => FinancialStatementCopy.yearLabel(context, e)).join(', ');
     }
 
     String dividendText() {
       if (d.hasDividend == null) return '-';
-      return d.hasDividend! ? '있음' : '없음';
+      return d.hasDividend!
+          ? FinancialStatementCopy.yes(context)
+          : FinancialStatementCopy.no(context);
     }
 
     return Card(
@@ -605,20 +719,20 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("안정성", style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(FinancialStatementCopy.stabilityTitle(context), style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: _miniMetricCard(
-                    title: "적자 여부",
+                    title: FinancialStatementCopy.lossYearsTitle(context),
                     value: lossText(),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _miniMetricCard(
-                    title: "부채비율",
+                    title: FinancialStatementCopy.debtRatioTitle(context),
                     value: _fmtPercent(d.debtRatio),
                   ),
                 ),
@@ -626,7 +740,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
             ),
             const SizedBox(height: 10),
             _miniMetricCard(
-              title: "최근 배당",
+              title: FinancialStatementCopy.recentDividendTitle(context),
               value: dividendText(),
             ),
           ],
@@ -640,21 +754,18 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     return Card(
       elevation: 0,
       color: Colors.grey.withAlpha(18),
-      child: const Padding(
-        padding: EdgeInsets.all(14),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
         child: Text(
-          "※ 안내\n"
-          "- EPS/BPS/DPS는 적정가 계산에 직접 사용된 값입니다.\n"
-          "- 장기 지표는 종목의 질을 길게 보기 위한 참고 정보입니다.\n"
-          "- 공시 반영 시점이나 데이터 제공 범위에 따라 일부 값은 비어 있을 수 있습니다.",
-          style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.45),
+          FinancialStatementCopy.noteText(context),
+          style: const TextStyle(fontSize: 12, color: Colors.black87, height: 1.45),
         ),
       ),
     );
   }
 
   // 가로에서 숫자/통화 문자열이 길어도 “오른쪽 끝”이 안 잘리도록
-  Widget _row(String label, String value, {String? helper}) {
+  Widget _row(String label, String value, {String? helper, String? valueSub}) {
     final mq = MediaQuery.of(context);
     final ts = mq.textScaler.scale(1.0).clamp(1.0, 2.0);
     final bool vertical = ts >= 1.35;
@@ -662,6 +773,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     final labelStyle = TextStyle(color: Colors.grey[700], fontSize: 12);
     final helperStyle = TextStyle(color: Colors.grey[600], fontSize: 11);
     final valueStyle = const TextStyle(fontWeight: FontWeight.w700);
+    final valueSubStyle = TextStyle(color: Colors.grey[600], fontSize: 11);
 
     Widget valueWidget() {
       // '-' 같은 짧은 값은 그냥
@@ -700,11 +812,24 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
                 ],
                 const SizedBox(height: 6),
                 Align(
+                  // 세로형
                   alignment: Alignment.centerRight,
                   child: SizedBox(
-                    // 세로형에서는 값이 충분히 크도록 전체폭 활용
                     width: double.infinity,
-                    child: valueWidget(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        valueWidget(),
+                        if (valueSub != null && valueSub.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            valueSub,
+                            style: valueSubStyle,
+                            textAlign: TextAlign.right,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -728,11 +853,213 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
                 Flexible(
                   child: Align(
                     alignment: Alignment.centerRight,
-                    child: valueWidget(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        valueWidget(),
+                        if (valueSub != null && valueSub.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            valueSub,
+                            style: valueSubStyle,
+                            textAlign: TextAlign.right,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
     );
+  }
+
+  String _pdfFsText(num? v) {
+    if (v == null) return '-';
+    return _isKR ? fmtWon(v) : fmtUsd(v);
+  }
+
+  String _pdfSummaryMoneyWithUsdRef(num? raw, StockFinancialDetails? d) {
+    if (raw == null) return '-';
+
+    if (_isKR || d == null) {
+      return _pdfFsText(raw);
+    }
+
+    final rawCurrency = _reportedCurrencyOf(d);
+    final rawText = _fmtRawStatementMoney(raw, currencyCode: rawCurrency);
+    final usdRef = _usdReferenceText(raw, d);
+
+    if (usdRef == null || usdRef.trim().isEmpty) {
+      return rawText;
+    }
+
+    return '$rawText\n$usdRef';
+  }
+
+  String? _financialPdfMetaText(
+    StockFundamentals f,
+    StockFinancialDetails? d,
+  ) {
+    final lines = <String>[];
+
+    final meta = _metaLine(f);
+    if (meta.isNotEmpty) {
+      lines.add(meta);
+    }
+
+    if (_isUS && d != null) {
+      final currency = _reportedCurrencyOf(d);
+      if (currency.isNotEmpty) {
+        lines.add(_reportedCurrencyText(currency));
+      }
+    }
+
+    final fsSource = f.fsSource?.trim();
+    if (fsSource != null && fsSource.isNotEmpty) {
+      lines.add(FinancialStatementCopy.fsSourceLabel(context, fsSource));
+    }
+
+    return lines.isEmpty ? null : lines.join('\n');
+  }
+
+  String _financialPeriodText(StockFundamentals f) {
+    final pl = f.periodLabel?.trim();
+    if (pl != null && pl.isNotEmpty) return pl;
+
+    final bd = f.basDt?.trim();
+    if (bd != null && bd.isNotEmpty) return _fmtBasDt(bd);
+
+    if (f.year != null) return FinancialStatementCopy.yearLabel(context, f.year!);
+
+    return '-';
+  }
+
+  Future<void> _saveFinancialStatementPdf() async {
+    final f = _details?.current ?? widget.initialFundamentals;
+    final d = _details;
+
+    if (f == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(FinancialStatementCopy.pdfNoData(context))),
+      );
+      return;
+    }
+
+    try {
+      final labels = FinancialStatementPdfLabels(
+        documentTitleSuffix: t.fsPdfDocumentTitleSuffix,
+        summarySectionTitle: t.fsPdfSummarySectionTitle,
+        buffettAssistSectionTitle: t.fsPdfBuffettAssistSectionTitle,
+        trendSectionTitle: t.fsPdfTrendSectionTitle,
+        stabilitySectionTitle: t.fsPdfStabilitySectionTitle,
+        periodLabel: t.fsPdfPeriodLabel,
+        revenueLabel: t.fsPdfRevenueLabel,
+        opIncomeLabel: t.fsPdfOpIncomeLabel,
+        netIncomeLabel: t.fsPdfNetIncomeLabel,
+        equityLabel: t.fsPdfEquityLabel,
+        liabilitiesLabel: t.fsPdfLiabilitiesLabel,
+        financialSourceLabel: t.fsPdfFinancialSourceLabel,
+        avg3yEpsLabel: t.fsPdfAvg3yEpsLabel,
+        avg5yRoeLabel: t.fsPdfAvg5yRoeLabel,
+        yearlyEpsLabel: t.fsPdfYearlyEpsLabel,
+        yearlyRoeLabel: t.fsPdfYearlyRoeLabel,
+        lossYearsLabel: t.fsPdfLossYearsLabel,
+        debtRatioLabel: t.fsPdfDebtRatioLabel,
+        recentDividendLabel: t.fsPdfRecentDividendLabel,
+        disclaimerText: t.fsPdfDisclaimerText,
+        shareTextSuffix: t.fsPdfShareTextSuffix,
+        platformNotSupportedText: t.fsPdfPlatformNotSupportedText,
+        fontLoadErrorText: t.fsPdfFontLoadErrorText,
+      );
+
+      final data = FinancialStatementPdfData(
+        name: _displayName,
+        originalName: _originalDisplayName,
+        code: widget.item.code,
+        marketText: _isKR ? 'KR' : 'US',
+        sourceText: FinancialStatementCopy.pdfSourceText(context, widget.market),
+        metaText: _financialPdfMetaText(f, d),
+        periodText: _financialPeriodText(f),
+        revenueText: _pdfSummaryMoneyWithUsdRef(d?.revenue ?? f.revenue, d),
+        opIncomeText: _pdfSummaryMoneyWithUsdRef(d?.opIncome ?? f.opIncome, d),
+        netIncomeText: _pdfSummaryMoneyWithUsdRef(d?.netIncome ?? f.netIncome, d),
+        equityText: _pdfSummaryMoneyWithUsdRef(d?.equity ?? f.equity, d),
+        liabilitiesText: _pdfSummaryMoneyWithUsdRef(d?.liabilities ?? f.liabilities, d),
+        fsSourceText: (f.fsSource ?? '').trim().isEmpty ? '-' : f.fsSource!,
+
+        epsAvg3yText: d == null ? '-' : _pdfMetricValue(d.epsAvg3y),
+        roeAvg5yText: d == null ? '-' : _pdfPercent(d.roeAvg5y),
+
+        epsHistoryLines: d == null
+            ? const []
+            : _yearMetricLines(d.epsHistory, _pdfMetricValue),
+        roeHistoryLines: d == null
+            ? const []
+            : _yearMetricLines(
+                d.roeHistory,
+                (v) => _pdfPercent(v is num ? v.toDouble() : null),
+              ),
+
+        lossYearsText: d == null ? '-' : _lossYearsText(d),
+        debtRatioText: d == null ? '-' : _pdfPercent(d.debtRatio),
+        hasDividendText: d == null ? '-' : _hasDividendText(d),
+        labels: labels,
+      );
+
+      final savedPath = await _financialPdfService.savePdf(data);
+
+      if (!mounted) return;
+
+      if (savedPath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(FinancialStatementCopy.pdfCanceled(context))),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(FinancialStatementCopy.pdfStarted(context))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(FinancialStatementCopy.pdfFailed(context, e))),
+      );
+    }
+  }
+
+  String _pdfMetricValue(num? v) {
+    if (v == null) return '-';
+    return _isKR
+        ? fmtWonDecimal(v, fractionDigits: 0)
+        : fmtUsdDecimal(v, fractionDigits: 2);
+  }
+
+  String _pdfPercent(double? v, {int digits = 1}) {
+    if (v == null) return '-';
+    return '${v.toStringAsFixed(digits)}%';
+  }
+
+  List<String> _yearMetricLines(
+    List<YearMetric> items,
+    String Function(num? v) formatter,
+  ) {
+    return items
+        .map((e) => '${FinancialStatementCopy.yearLabel(context, e.year)}\n${formatter(e.value)}')
+        .toList();
+  }
+
+  String _lossYearsText(StockFinancialDetails d) {
+    if (d.lossYears.isEmpty) return FinancialStatementCopy.none(context);
+    return d.lossYears.map((e) => FinancialStatementCopy.yearLabel(context, e)).join(', ');
+  }
+
+  String _hasDividendText(StockFinancialDetails d) {
+    if (d.hasDividend == null) return '-';
+    return d.hasDividend!
+        ? FinancialStatementCopy.yes(context)
+        : FinancialStatementCopy.no(context);
   }
 }

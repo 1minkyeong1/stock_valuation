@@ -118,6 +118,25 @@ class FmpClient {
     return {'ok': false, 'symbol': symbol, 'error': 'BAD_RESPONSE_TYPE'};
   }
 
+  // 환전
+  Future<Map<String, dynamic>> fxRate({
+    required String from,
+    required String to,
+  }) async {
+    final body = await _getJson('/fmp/fx-rate', {
+      'from': from.trim().toUpperCase(),
+      'to': to.trim().toUpperCase(),
+    });
+
+    if (body is Map) return Map<String, dynamic>.from(body);
+    return {
+      'ok': false,
+      'from': from,
+      'to': to,
+      'error': 'BAD_RESPONSE_TYPE',
+    };
+  }
+
   // =========================
   // Existing endpoints
   // =========================

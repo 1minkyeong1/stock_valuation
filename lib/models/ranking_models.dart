@@ -38,6 +38,7 @@ class KrRankItem {
   final num? pbr;
   final num? eps;
   final num? bps;
+  final num? dps;
   final num? score;
 
   KrRankItem({
@@ -52,6 +53,7 @@ class KrRankItem {
     this.pbr,
     this.eps,
     this.bps,
+    this.dps,
     this.score,
   });
 

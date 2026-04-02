@@ -81,4 +81,21 @@ class RecentStore {
 
     await sp.setString(_k, jsonEncode(list));
   }
+
+  Future<List<Map<String, dynamic>>> exportAllRaw() async {
+    final sp = await SharedPreferences.getInstance();
+    final raw = sp.getString(_k);
+    if (raw == null || raw.isEmpty) return [];
+
+    final List list = jsonDecode(raw);
+    return list
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  Future<void> replaceAllRaw(List<Map<String, dynamic>> rows) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(_k, jsonEncode(rows));
+  }
 }

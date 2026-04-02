@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../l10n/app_localizations.dart';
 import 'terms_text.dart';
 import 'privacy_text.dart';
+import '../services/app_update_service.dart';
 
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
@@ -28,19 +30,26 @@ class _AboutPageState extends State<AboutPage> {
 
   void _showSnack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
   }
 
-  void _showTextDialog(String title, String content) {
+  void _showTextDialog(
+    String title,
+    String content, {
+    String? url,
+  }) {
     showDialog(
       context: context,
       builder: (ctx) {
         final mq = MediaQuery.of(ctx);
+        final t = AppLocalizations.of(ctx)!;
+
         return AlertDialog(
           title: Text(title),
           content: SizedBox(
             width: double.maxFinite,
-            // 화면 작은 기기에서도 너무 커지지 않게 제한
             height: mq.size.height * 0.55,
             child: Scrollbar(
               thumbVisibility: true,
@@ -53,9 +62,14 @@ class _AboutPageState extends State<AboutPage> {
             ),
           ),
           actions: [
+            if (url != null)
+              TextButton(
+                onPressed: () => _openUrl(url),
+                child: Text(t.privacyOpenWeb),
+              ),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('닫기'),
+              child: Text(t.close),
             ),
           ],
         );
@@ -64,17 +78,27 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Future<void> _openUrl(String url) async {
+    final t = AppLocalizations.of(context)!;
     final uri = Uri.tryParse(url);
+
     if (uri == null) {
-      _showSnack('링크 형식이 올바르지 않습니다.');
+      _showSnack(t.invalidLink);
       return;
     }
 
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok) _showSnack('링크를 열 수 없습니다.');
+    final ok = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!ok) {
+      _showSnack(t.cannotOpenLink);
+    }
   }
 
   Future<void> _sendEmail(String email, {String? subject}) async {
+    final t = AppLocalizations.of(context)!;
+
     final uri = Uri(
       scheme: 'mailto',
       path: email,
@@ -84,26 +108,29 @@ class _AboutPageState extends State<AboutPage> {
     );
 
     final ok = await launchUrl(uri);
-    if (!ok) _showSnack('메일 앱을 열 수 없습니다.');
+    if (!ok) {
+      _showSnack(t.cannotOpenMailApp);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
+
     final versionText = (_info == null)
-        ? '불러오는 중...'
+        ? t.loading
         : '${_info!.version} (${_info!.buildNumber})';
 
-    // ✅ 앱 정보
     const companyName = 'KMIN';
-    const companyDesc = '투기적인 매매가 아닌 원칙 있는 투자, 불확실한 미래 예측보다 확실한 재무 수치에 집중하는 보수적 투자자를 위한 앱입니다.';
     const supportEmail = 'k17mnk@gmail.com';
 
-    // ✅ 스토어 링크 (패키지명 실제 값으로 바꾸세요)
     const androidStoreUrl =
         'https://play.google.com/store/apps/details?id=com.kmin.stock_valuation_app';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('앱 정보')),
+      appBar: AppBar(
+        title: Text(t.aboutApp),
+      ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 18),
         children: [
@@ -116,87 +143,179 @@ class _AboutPageState extends State<AboutPage> {
                   width: 95,
                   height: 37,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Icon(Icons.image_not_supported_outlined, size: 48),
+                  errorBuilder: (_, _, _) => const Icon(
+                    Icons.image_not_supported_outlined,
+                    size: 48,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 const Text(
                   companyName,
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: Text(
-                    companyDesc,
+                    t.companyDescription,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.black54),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text('버전: $versionText', style: const TextStyle(color: Colors.black54)),
+                Text(
+                  t.versionLabel(versionText),
+                  style: const TextStyle(color: Colors.black54),
+                ),
+                if (AppUpdateService.hasUpdate) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withAlpha(18),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.orange.withAlpha(80)),
+                    ),
+                    child: Text(
+                      t.updateAvailableBadge,
+                      style: const TextStyle(
+                        color: Colors.orange,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: 160,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await AppUpdateService.startImmediateUpdate();
+                      },
+                      child: Text(t.updateFromAbout),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    t.updateCheckInAboutHint,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
           ),
-
           const SizedBox(height: 18),
           const Divider(height: 1),
 
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text('문의', style: TextStyle(fontWeight: FontWeight.bold)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Text(
+              t.contact,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.email_outlined),
-            title: const Text('이메일 문의'),
-            subtitle: Text(supportEmail),
-            onTap: () => _sendEmail(supportEmail, subject: '[앱 문의]'),
+            title: Text(t.emailInquiry),
+            subtitle: const Text(supportEmail),
+            onTap: () => _sendEmail(
+              supportEmail,
+              subject: t.appInquirySubject,
+            ),
           ),
-          // ListTile(
-          //   leading: const Icon(Icons.chat_outlined),
-          //   title: const Text('오픈채팅/메신저'),
-          //   subtitle: const Text('빠른 문의'),
-          //   onTap: () => _openUrl(kakaoOpenChatUrl),
-          // ),
-          // ListTile(
-          //   leading: const Icon(Icons.home_outlined),
-          //   title: const Text('홈페이지'),
-          //   subtitle: const Text('공지/FAQ'),
-          //   onTap: () => _openUrl(homepageUrl),
-          // ),
 
           const Divider(height: 1),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text('업데이트', style: TextStyle(fontWeight: FontWeight.bold)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Text(
+              t.update,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
           ListTile(
-            leading: const Icon(Icons.system_update_alt),
-            title: const Text('스토어에서 업데이트 확인'),
-            subtitle: const Text('최신 버전 설치'),
-            onTap: () => _openUrl(androidStoreUrl),
+            leading: Icon(
+              Icons.system_update_alt,
+              color: AppUpdateService.hasUpdate ? Colors.red : null,
+            ),
+            title: Text(
+              AppUpdateService.hasUpdate
+                  ? t.updateAvailableMenuTitle
+                  : t.checkForUpdates,
+              style: TextStyle(
+                color: AppUpdateService.hasUpdate ? Colors.red : null,
+                fontWeight:
+                    AppUpdateService.hasUpdate ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+            subtitle: Text(
+              AppUpdateService.hasUpdate
+                  ? t.updateAvailableMenuSubtitle
+                  : t.installLatestVersion,
+            ),
+            trailing: AppUpdateService.hasUpdate
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withAlpha(18),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.red.withAlpha(80)),
+                    ),
+                    child: Text(
+                      t.updateAvailableBadge,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                : null,
+            onTap: () async {
+              if (AppUpdateService.hasUpdate) {
+                await AppUpdateService.startImmediateUpdate();
+              } else {
+                await _openUrl(androidStoreUrl);
+              }
+            },
           ),
 
           const Divider(height: 1),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text('기타', style: TextStyle(fontWeight: FontWeight.bold)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Text(
+              t.misc,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.description_outlined),
-            title: const Text('이용약관'),
-            onTap: () => _showTextDialog('이용약관', TermsText.content),
+            title: Text(t.termsOfService),
+            onTap: () => _showTextDialog(
+              t.termsOfService,
+              TermsText.content(context),
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.privacy_tip_outlined),
-            title: const Text('개인정보처리방침'),
-            onTap: () => _showTextDialog('개인정보처리방침', PrivacyText.content),
+            title: Text(t.privacyPolicy),
+            onTap: () => _showTextDialog(
+              t.privacyPolicy,
+              PrivacyText.content(context),
+              url: PrivacyText.url,
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.code),
-            title: const Text('오픈소스 라이선스'),
+            title: Text(t.openSourceLicenses),
             onTap: () => showLicensePage(
               context: context,
-              applicationName: '주식적정가격계산기',
+              applicationName: t.appTitle,
               applicationVersion: versionText,
             ),
           ),

@@ -151,6 +151,41 @@ class UsFmpRepository implements StockRepository {
     return year != null ? '$year FY' : 'FY';
   }
 
+  static String? _pickReportedCurrency(
+    Map<String, dynamic>? incomeRow,
+    Map<String, dynamic>? bsRow,
+    Map<String, dynamic>? profile,
+  ) {
+    final raw = (
+      incomeRow?['reportedCurrency'] ??
+      incomeRow?['currency'] ??
+      bsRow?['reportedCurrency'] ??
+      bsRow?['currency'] ??
+      profile?['reportedCurrency'] ??
+      profile?['currency']
+    )?.toString().trim().toUpperCase();
+
+    if (raw == null || raw.isEmpty) return null;
+    if (raw == 'CNY') return 'RMB';
+    return raw;
+  }
+
+  static String _fxBaseCurrency(String? reportedCurrency) {
+    final c = (reportedCurrency ?? 'USD').trim().toUpperCase();
+    if (c == 'RMB') return 'CNY';
+    return c;
+  }
+
+  static double? _toPositiveRate(Map<String, dynamic> m) {
+    final n = _asDouble(m['rate']);
+    return n > 0 ? n : null;
+  }
+
+  double _applyFxToUsd(double value, double? fxRateToUsd) {
+    if (fxRateToUsd == null || fxRateToUsd <= 0) return value;
+    return value * fxRateToUsd;
+  }
+
   static bool _isHttp402(Object e) => e.toString().contains('HTTP 402');
   static bool _isHttp429(Object e) => e.toString().contains('HTTP 429');
 
@@ -382,6 +417,7 @@ class UsFmpRepository implements StockRepository {
     if (symbol.isEmpty) {
       return StockFinancialDetails(
         current: const StockFundamentals(eps: 0, bps: 0, dps: 0),
+        reportedCurrency: null,
         lossYears: const [],
         debtRatio: null,
         hasDividend: null,
@@ -414,17 +450,22 @@ class UsFmpRepository implements StockRepository {
         period: 'annual',
       );
 
+      // ✅ 통화 fallback용
+      final profF = _fmp.profileOne(symbol);
+
       final results = await Future.wait([
         qIncomeF,
         aIncomeF,
         qBsF,
         aBsF,
+        profF,
       ]).timeout(const Duration(seconds: 10));
 
       final qIncomeList = _unwrapList(results[0]);
       final aIncomeList = _unwrapList(results[1]);
       final qBsList = _unwrapList(results[2]);
       final aBsList = _unwrapList(results[3]);
+      final prof = _unwrapOne(results[4]);
 
       if (dbg) {
         debugPrint(
@@ -449,6 +490,25 @@ class UsFmpRepository implements StockRepository {
       final latestBs = usedQuarter
           ? _pickMatchingBsRow(qBsList, latestIncome)
           : _pickMatchingBsRow(aBsList, latestIncome);
+
+      final reportedCurrency = _pickReportedCurrency(
+        latestIncome,
+        latestBs,
+        prof,
+      );
+
+      double? fxRateToUsd;
+      if (reportedCurrency != null && reportedCurrency != 'USD') {
+        try {
+          final fx = await _fmp.fxRate(
+            from: _fxBaseCurrency(reportedCurrency),
+            to: 'USD',
+          );
+          fxRateToUsd = _toPositiveRate(fx);
+        } catch (e) {
+          if (dbg) debugPrint('[FMP] fxRate error $reportedCurrency->$symbol: $e');
+        }
+      }        
 
       final revenue = latestIncome == null
           ? null
@@ -561,6 +621,8 @@ class UsFmpRepository implements StockRepository {
 
       return StockFinancialDetails(
         current: current,
+        reportedCurrency: reportedCurrency,
+        fxRateToUsd: fxRateToUsd,
         revenue: revenue,
         opIncome: opIncome,
         netIncome: netIncome,
@@ -578,6 +640,7 @@ class UsFmpRepository implements StockRepository {
       if (dbg) debugPrint('[FMP] getFinancialDetails TIMEOUT symbol=$symbol');
       return StockFinancialDetails(
         current: current,
+        reportedCurrency: null,
         lossYears: const [],
         debtRatio: null,
         hasDividend: current.dps > 0,
@@ -589,6 +652,7 @@ class UsFmpRepository implements StockRepository {
       }
       return StockFinancialDetails(
         current: current,
+        reportedCurrency: null,
         lossYears: const [],
         debtRatio: null,
         hasDividend: current.dps > 0,
@@ -731,6 +795,25 @@ class UsFmpRepository implements StockRepository {
           ? _pickMatchingBsRow(qBsList, latestIncome)
           : _pickMatchingBsRow(aBsList, latestIncome);
 
+      final reportedCurrency = _pickReportedCurrency(
+        latestIncome,
+        latestBs,
+        prof,
+      );
+
+      double? fxRateToUsd;
+      if (reportedCurrency != null && reportedCurrency != 'USD') {
+        try {
+          final fx = await _fmp.fxRate(
+            from: _fxBaseCurrency(reportedCurrency),
+            to: 'USD',
+          );
+          fxRateToUsd = _toPositiveRate(fx);
+        } catch (e) {
+          if (dbg) debugPrint('[FMP] fxRate error $reportedCurrency->$symbol: $e');
+        }
+      }    
+
       final year = _toYear(
         latestIncome?['calendarYear'] ?? latestIncome?['fiscalYear'] ?? latestIncome?['year'],
       );
@@ -853,6 +936,22 @@ class UsFmpRepository implements StockRepository {
         }
       }
 
+      if (reportedCurrency != null &&
+        reportedCurrency != 'USD' &&
+        fxRateToUsd != null) {
+      epsTtm = _applyFxToUsd(epsTtm, fxRateToUsd);
+      bps = _applyFxToUsd(bps, fxRateToUsd);
+      dps = _applyFxToUsd(dps, fxRateToUsd);
+
+      if (dbg) {
+        debugPrint(
+          '[FMP] converted to USD '
+          'currency=$reportedCurrency rate=$fxRateToUsd '
+          'eps=$epsTtm bps=$bps dps=$dps',
+        );
+      }
+    }
+
       final epsSource = qIncomeList.isNotEmpty
           ? 'income-statement(quarter,sum4)'
           : 'income-statement(annual)';
@@ -861,6 +960,17 @@ class UsFmpRepository implements StockRepository {
       final epsLabel = (incomeBasDt != null) ? 'TTM (as of $incomeBasDt)' : 'TTM';
       final dpsLabel = 'Dividends (last 8)';
 
+      final conversionSuffix =
+          (reportedCurrency != null &&
+                  reportedCurrency != 'USD' &&
+                  fxRateToUsd != null)
+              ? ' · converted $reportedCurrency→USD @ ${fxRateToUsd.toStringAsFixed(6)}'
+              : '';
+
+      final epsLabel2 = '$epsLabel$conversionSuffix';
+      final bpsLabel2 = '$bpsLabel$conversionSuffix';
+      final dpsLabel2 = '$dpsLabel$conversionSuffix';
+
       return StockFundamentals(
         eps: epsTtm,
         bps: bps,
@@ -868,15 +978,15 @@ class UsFmpRepository implements StockRepository {
         year: year,
         basDt: incomeBasDt,
         periodLabel: periodLabel,
-        epsLabel: epsLabel,
-        bpsLabel: bpsLabel,
-        dpsLabel: dpsLabel,
+        epsLabel: epsLabel2,
+        bpsLabel: bpsLabel2,
+        dpsLabel: dpsLabel2,
         epsSource: epsSource,
         bpsSource: bpsSource,
         dpsSource: dpsSource,
         fsSource: usedQuarter
-            ? 'FMP quarter income-statement + balance-sheet ($incomeBasDt)'
-            : 'FMP annual income-statement + balance-sheet',
+            ? 'FMP quarter income-statement + balance-sheet ($incomeBasDt)$conversionSuffix'
+            : 'FMP annual income-statement + balance-sheet$conversionSuffix',
       );
     } on TimeoutException {
       if (dbg) debugPrint('[FMP] getFundamentals TIMEOUT');

@@ -46,6 +46,7 @@ class UsStubRepository implements StockRepository {
 
     return StockFinancialDetails(
       current: current,
+      reportedCurrency: null,
       revenue: null,
       opIncome: null,
       netIncome: null,

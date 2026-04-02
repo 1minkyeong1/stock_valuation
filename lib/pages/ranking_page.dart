@@ -17,6 +17,7 @@ import '../data/stores/recent_store.dart';
 import '../utils/search_alias.dart';
 import '../services/ad_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../l10n/app_localizations.dart';
 
 const String kWorkerBaseUrl = String.fromEnvironment(
   'WORKER_BASE_URL',
@@ -34,6 +35,11 @@ class RankingPage extends StatefulWidget {
 class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin {
   late final TabController _tab;
   final _recentStore = RecentStore();
+
+  // 번역
+  AppLocalizations get t => AppLocalizations.of(context)!;
+
+  bool get _isKo => Localizations.localeOf(context).languageCode == 'ko';
 
   // KR
   bool _krLoading = true;
@@ -68,13 +74,19 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
   // US표시용 이름 helper
   String _usDisplayName(UsRankItem it) {
-    return SearchAlias.usPrimaryKoName(it.tickerFmp) ?? it.name;
+    if (_isKo) {
+      return SearchAlias.usPrimaryKoName(it.tickerFmp) ?? it.name;
+    }
+    return it.name;
   }
 
   String _usDisplaySubtitle(UsRankItem it) {
-    final ko = SearchAlias.usPrimaryKoName(it.tickerFmp);
-    if (ko == null) return it.tickerDisplay;
-    return '${it.tickerDisplay} · ${it.name}';
+    if (_isKo) {
+      final ko = SearchAlias.usPrimaryKoName(it.tickerFmp);
+      if (ko == null) return it.tickerDisplay;
+      return '${it.tickerDisplay} · ${it.name}';
+    }
+    return it.tickerDisplay;
   }
 
   Uri _krRankUri() {
@@ -84,6 +96,33 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         'limit': '200',
         'market': _krBoard,
       },
+    );
+  }
+
+  // 한글 (영어매핑)
+  String _displayRankingName({
+    required String code,
+    required String koName,
+  }) {
+    final locale = Localizations.localeOf(context);
+
+    return SearchAlias.displayKrName(
+      code: code,
+      koName: koName,
+      locale: locale,
+    );
+  }
+
+  String? _displayRankingOriginalName({
+    required String code,
+    required String koName,
+  }) {
+    final locale = Localizations.localeOf(context);
+
+    return SearchAlias.displayKrOriginalName(
+      code: code,
+      koName: koName,
+      locale: locale,
     );
   }
 
@@ -169,6 +208,20 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         '${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)} KST';
   }
 
+  String _rankingBasisText(bool isKr) {
+    if (_isKo) {
+      return isKr ? '요구수익률 15% 기준' : '요구수익률 10% 기준';
+    }
+    return isKr
+        ? 'Based on required return 15%'
+        : 'Based on required return 10%';
+  }
+
+  String _rankingUpdatedText(DateTime? fetchedAt, bool isKr) {
+    final updated = _fmtUpdated(fetchedAt);
+    return '$updated (${_rankingBasisText(isKr)})';
+  }
+
   void _openSearch() {
     Navigator.push(
       context,
@@ -214,6 +267,12 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           hub: widget.hub,
           item: item,
           market: Market.kr,
+          useRankingSnapshot: true,
+          rankingPrice: it.price?.toDouble(),
+          rankingEps: it.eps?.toDouble(),
+          rankingBps: it.bps?.toDouble(),
+          rankingDps: it.dps?.toDouble(),
+          rankingRPct: 15.0,
         ),
       ),
     );
@@ -257,6 +316,12 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           hub: widget.hub,
           item: item,
           market: Market.us,
+          useRankingSnapshot: true,
+          rankingPrice: it.price?.toDouble(),
+          rankingEps: it.eps?.toDouble(),
+          rankingBps: it.bps?.toDouble(),
+          rankingDps: it.dps?.toDouble(),
+          rankingRPct: 10.0,
         ),
       ),
     );
@@ -289,7 +354,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
         setState(() {
           _krNotReady = true;
-          _krNotReadyMsg = r.message ?? '랭킹 생성중입니다... 잠시만요!';
+          _krNotReadyMsg = r.message ?? t.rankingStillGeneratingWait;
           _krItems = [];
           _krFetchedAt = generatedAtLocal;
           _krLoading = false;
@@ -331,7 +396,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         // 기존 데이터가 없을 때만 안내 문구
         if (_krItems.isEmpty) {
           _krNotReady = true;
-          _krNotReadyMsg = 'KR 랭킹 생성중입니다... 잠시 후 다시 시도해주세요.';
+          _krNotReadyMsg = t.krRankingGeneratingRetry;
         }
       });
     }
@@ -359,7 +424,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         final generatedAtLocal = _parseServerTime(r.generatedAt);
 
         setState(() {
-          _usError = r.message ?? '랭킹 생성중입니다... 잠시만요!';
+          _usError = t.usRankingError(r.error ?? 'UNKNOWN');
           _usItems = [];
           _usFetchedAt = generatedAtLocal;
           _usLoading = false;
@@ -371,7 +436,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         final generatedAtLocal = _parseServerTime(r.generatedAt);
 
         setState(() {
-          _usError = 'US 랭킹 오류: ${r.error ?? "UNKNOWN"}';
+          _usError = t.usRankingError(r.error ?? 'UNKNOWN');
           _usItems = [];
           _usFetchedAt = generatedAtLocal;
           _usLoading = false;
@@ -511,7 +576,21 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     if (q.isEmpty) return _krItems;
 
     return _krItems.where((it) {
-      return it.name.toLowerCase().contains(q) ||
+      final displayName = _displayRankingName(
+        code: it.code,
+        koName: it.name,
+      ).toLowerCase();
+
+      final originalName = (_displayRankingOriginalName(
+            code: it.code,
+            koName: it.name,
+          ) ??
+          '')
+          .toLowerCase();
+
+      return displayName.contains(q) ||
+          originalName.contains(q) ||
+          it.name.toLowerCase().contains(q) ||
           it.code.toLowerCase().contains(q) ||
           it.market.toLowerCase().contains(q);
     }).toList();
@@ -574,33 +653,58 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     final icon = _diffIcon(diff);
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(
-          fmtWon(price),
-          style: const TextStyle(fontWeight: FontWeight.w800),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(
+            fmtWon(price),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
         ),
         const SizedBox(height: 2),
         if (hasDiff)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) Icon(icon, size: 18, color: color),
-              Text(
-                '${_signed(fmtWon(diff), diff)} (${changePct.toStringAsFixed(2)}%)',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color,
-                  fontWeight: FontWeight.w700,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) Icon(icon, size: 18, color: color),
+                Text(
+                  '${_signed(fmtWon(diff), diff)} (${changePct.toStringAsFixed(2)}%)',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           )
         else
-          Text(
-            '전일대비 -',
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              t.previousDayChangeNone,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
           ),
       ],
     );
@@ -623,30 +727,58 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     final icon = _diffIcon(diff);
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text('\$${price.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w800)),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(
+            '\$${price.toStringAsFixed(2)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
+        ),
         const SizedBox(height: 2),
         if (hasDiff)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) Icon(icon, size: 18, color: color),
-              Text(
-                '${diff > 0 ? '+' : ''}\$${diff.toStringAsFixed(2)} (${changePct.toStringAsFixed(2)}%)',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color,
-                  fontWeight: FontWeight.w700,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) Icon(icon, size: 18, color: color),
+                Text(
+                  '${diff > 0 ? '+' : ''}\$${diff.toStringAsFixed(2)} (${changePct.toStringAsFixed(2)}%)',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           )
         else
-          Text(
-            'chg -',
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              t.changeNone,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
           ),
       ],
     );
@@ -780,7 +912,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: Material(
         color: cs.surface,
         borderRadius: BorderRadius.circular(18),
@@ -849,8 +981,11 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                     ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                trailing,
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 128,
+                  child: trailing,
+                ),
               ],
             ),
           ),
@@ -862,6 +997,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   Widget _metaRow({
     required DateTime? fetchedAt,
     required int count,
+    required bool isKr,
   }) {
     final cs = Theme.of(context).colorScheme;
 
@@ -876,7 +1012,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  ' ${_fmtUpdated(fetchedAt)} (기대수익률 기준)',
+                  _rankingUpdatedText(fetchedAt, isKr),
                   style: TextStyle(
                     fontSize: 12,
                     color: cs.onSurfaceVariant,
@@ -884,7 +1020,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                 ),
               ),
               Text(
-                '$count개',
+                t.rankingItemCount(count),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -895,7 +1031,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           ),
           const SizedBox(height: 2),
           Text(
-            '현재가는 화면 진입 후 다시 반영될 수 있어요.',
+            t.rankingPriceMayUpdate,
             style: TextStyle(
               fontSize: 11,
               color: cs.onSurfaceVariant,
@@ -913,7 +1049,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _metaRow(fetchedAt: _krFetchedAt, count: 0),
+        _metaRow(fetchedAt: _krFetchedAt, count: 0, isKr: true),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Card(
@@ -932,7 +1068,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(_krNotReadyMsg ?? '랭킹 생성중입니다... 잠시만요!'),
+                    child: Text(_krNotReadyMsg ?? t.rankingStillGeneratingWait),
                   ),
                 ],
               ),
@@ -943,7 +1079,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            '요청 URL: ${_krRankUri()}',
+            '${t.requestUrlLabel}: ${_krRankUri()}',
             style: TextStyle(color: cs.onSurfaceVariant),
           ),
         ),
@@ -953,19 +1089,19 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
   PreferredSizeWidget _buildAppBarBottom() {
     return PreferredSize(
-      preferredSize: const Size.fromHeight(96),
+      preferredSize: const Size.fromHeight(100),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TabBar(
             controller: _tab,
-            tabs: const [
-              Tab(text: 'KR'),
-              Tab(text: 'US'),
+            tabs: [
+              Tab(text: t.tabKr),
+              Tab(text: t.tabUs),
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             child: AnimatedBuilder(
               animation: _tab,
               builder: (context, _) {
@@ -984,22 +1120,25 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
     if (_krLoading) {
       return _buildPreparingView(
-        'KR 랭킹 생성중입니다... 잠시만 기다려주세요.',
+        t.krRankingGeneratingWait,
         fetchedAt: _krFetchedAt,
+        isKr: true,
       );
     }
 
     if (_krError != null) {
       return _buildPreparingView(
-        'KR 랭킹 생성중입니다... 잠시 후 다시 시도해주세요.',
+        t.krRankingGeneratingRetry,
         fetchedAt: _krFetchedAt,
+        isKr: true,
       );
     }
 
     if (!_krLoading && _krItems.isEmpty && !_krNotReady && _krError == null) {
       return _buildPreparingView(
-        'KR 랭킹을 준비중입니다...',
+        t.krRankingPreparing,
         fetchedAt: _krFetchedAt,
+        isKr: true,
       );
     }
 
@@ -1015,8 +1154,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           _metaRow(
             fetchedAt: _krFetchedAt,
             count: 0,
+            isKr: true,
           ),
-          _buildEmptySearchResult('KR 랭킹 내 검색 결과가 없습니다.'),
+          _buildEmptySearchResult(t.krRankingSearchEmpty),
         ],
       );
     }
@@ -1030,20 +1170,35 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           return _metaRow(
             fetchedAt: _krFetchedAt,
             count: visible.length,
+            isKr: true,
           );
         }
 
         final it = visible[i - 1];
         final rank = _krOriginalRank(it);
 
+        final displayName = _displayRankingName(
+          code: it.code,
+          koName: it.name,
+        );
+
+        final originalName = _displayRankingOriginalName(
+          code: it.code,
+          koName: it.name,
+        );
+
+        final subtitle = originalName != null && originalName.isNotEmpty
+            ? '$originalName · ${it.code} · ${it.market}'
+            : '${it.code} · ${it.market}';
+
         return _rankCardTile(
           rank: rank,
-          title: it.name,
-          subtitle: '${it.code} · ${it.market}',
+          title: displayName,
+          subtitle: subtitle,
           trailing: _trailingKr(it),
           onTap: () => _openResultKr(it),
           companyMark: _companyMark(
-            title: it.name,
+            title: displayName,
             logoUrl: it.logoUrl,
             isUs: false,
           ),
@@ -1057,22 +1212,25 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
     if (_usLoading) {
       return _buildPreparingView(
-        'US 랭킹 생성중입니다... 잠시만 기다려주세요.',
+        t.usRankingGeneratingWait,
         fetchedAt: _usFetchedAt,
+        isKr: false,
       );
     }
 
     if (_usError != null) {
       return _buildPreparingView(
-        'US 랭킹 생성중입니다... 잠시 후 다시 시도해주세요.',
+        t.usRankingGeneratingRetry,
         fetchedAt: _usFetchedAt,
+        isKr: false,
       );
     }
 
     if (!_usLoading && _usItems.isEmpty && _usError == null) {
       return _buildPreparingView(
-        'US 랭킹을 준비중입니다...',
+        t.usRankingPreparing,
         fetchedAt: _usFetchedAt,
+        isKr: false,
       );
     }
 
@@ -1084,8 +1242,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           _metaRow(
             fetchedAt: _usFetchedAt,
             count: 0,
+            isKr: false,
           ),
-          _buildEmptySearchResult('US 랭킹 내 검색 결과가 없습니다.'),
+          _buildEmptySearchResult(t.usRankingSearchEmpty),
         ],
       );
     }
@@ -1099,6 +1258,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           return _metaRow(
             fetchedAt: _usFetchedAt,
             count: visible.length,
+            isKr: false,
           );
         }
 
@@ -1181,19 +1341,33 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     return SafeArea(
       child: Scaffold(
         appBar: AppBar(
-          title: const Text(
-            "저평가 기업",
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 21),
+          toolbarHeight: 70,
+          titleSpacing: 18,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          title: Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              t.rankingPageTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontSize: 19,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+                height: 1.15,
+              ),
+            ),
           ),
           bottom: _buildAppBarBottom(),
           actions: [
             IconButton(
-              tooltip: '검색',
+              tooltip: t.search,
               icon: const Icon(Icons.search),
               onPressed: _openSearch,
             ),
             IconButton(
-              tooltip: '새로고침',
+              tooltip: t.refresh,
               icon: const Icon(Icons.refresh),
               onPressed: _refreshCurrent,
             ),
@@ -1230,7 +1404,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     final isKr = _tab.index == 0;
 
     final ctrl = isKr ? _krRankSearchCtrl : _usRankSearchCtrl;
-    final hint = isKr ? '종목명 · 코드 검색' : '기업명 · 티커 검색';
+    final hint = isKr ? t.krRankSearchHint : t.usRankSearchHint;
 
     final ts = _uiScale(context);
     final fieldMinHeight = (40 + (ts - 1.0) * 14).clamp(40.0, 54.0);
@@ -1305,7 +1479,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                   ),
                   suffixIcon: hasText
                       ? IconButton(
-                          tooltip: '지우기',
+                          tooltip: t.clear,
                           splashRadius: 16,
                           onPressed: () {
                             ctrl.clear();
@@ -1368,14 +1542,14 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   }
 
   // 랭킹불러올 때 빈 공간 “랭킹 준비중” 문구로 덮기 위젯
-  Widget _buildPreparingView(String message, {DateTime? fetchedAt}) {
+  Widget _buildPreparingView(String message, {DateTime? fetchedAt, required bool isKr,}) {
     final cs = Theme.of(context).colorScheme;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _metaRow(fetchedAt: fetchedAt, count: 0),
+        _metaRow(fetchedAt: fetchedAt, count: 0, isKr: isKr),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Card(

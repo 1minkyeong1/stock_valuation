@@ -401,13 +401,13 @@ List<int> _parseIntList(dynamic raw) {
   String _reprtLabelFromCode(String? code) {
     switch (code) {
       case '11011':
-        return '연간';
+        return 'ANNUAL';
       case '11014':
-        return '3Q';
+        return 'Q3';
       case '11012':
-        return '반기';
+        return 'HALF';
       case '11013':
-        return '1Q';
+        return 'Q1';
       default:
         return '';
     }

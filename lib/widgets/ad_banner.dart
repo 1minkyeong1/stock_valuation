@@ -179,6 +179,10 @@ class _AdBannerState extends State<AdBanner> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    if (!AdService.I.adsEnabled) {
+      return const SizedBox.shrink();
+    }
+    
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
