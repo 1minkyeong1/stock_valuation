@@ -635,16 +635,16 @@ class _ResultPageState extends State<ResultPage> {
     return null;
   }
 
-  Widget _metricHint(String? s) {
-    if (s == null || s.trim().isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Text(
-        s,
-        style: const TextStyle(fontSize: 11, color: Colors.grey),
-      ),
-    );
-  }
+  // Widget _metricHint(String? s) {
+  //   if (s == null || s.trim().isEmpty) return const SizedBox.shrink();
+  //   return Padding(
+  //     padding: const EdgeInsets.only(top: 6),
+  //     child: Text(
+  //       s,
+  //       style: const TextStyle(fontSize: 11, color: Colors.grey),
+  //     ),
+  //   );
+  // }
 
   // ---------- Rating UI ----------
   IconData _ratingIcon(RatingLevel level) {
