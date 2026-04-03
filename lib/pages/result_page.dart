@@ -44,6 +44,7 @@ class ResultPage extends StatefulWidget {
   final double? rankingBps;
   final double? rankingDps;
   final double? rankingRPct;
+  final double? initialRequiredReturnPct;
 
   const ResultPage({
     super.key,
@@ -56,6 +57,7 @@ class ResultPage extends StatefulWidget {
     this.rankingBps,
     this.rankingDps,
     this.rankingRPct,
+    this.initialRequiredReturnPct,
   });
 
   @override
@@ -100,9 +102,11 @@ class _ResultPageState extends State<ResultPage> {
   StockFundamentals _initF = const StockFundamentals(eps: 0, bps: 0, dps: 0);
   double _initR = 5.0; // 9.0 -> 5.0
 
-  // 고급보기 토글용 (true=고급/작은카드, false=초급/큰카드)
+  // 헤더카드, 평가문구 토글용
   bool _showAdvanced = true;
+  bool _headerExpanded = true;
   static const _kResultViewMode = 'result_view_mode_v1';
+  static const _kHeaderExpanded = 'result_header_expanded_v1';
 
   String get _storeKey => "${widget.market.name}:${widget.item.code}";
   bool get _isUS => widget.market == Market.us;
@@ -136,7 +140,12 @@ class _ResultPageState extends State<ResultPage> {
   void _openSearch() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => SearchPage(hub: widget.hub)),
+      MaterialPageRoute(
+        builder: (_) => SearchPage(
+          hub: widget.hub,
+          initialRequiredReturnPct: rPct,
+        ),
+      ),
     );
   }
 
@@ -197,6 +206,23 @@ class _ResultPageState extends State<ResultPage> {
       koName: widget.item.name,
       locale: locale,
     );
+  }
+
+  // 국내 서브타이틀 영어매핑 보이기
+  String? get _headerSubtitleName {
+    if (_isUS) {
+      final original = _originalDisplayName?.trim();
+      if (original == null || original.isEmpty) return null;
+      return original;
+    }
+
+    final enName = SearchAlias.krEnglishName(widget.item.code)?.trim();
+
+    if (enName == null || enName.isEmpty || enName == widget.item.name.trim()) {
+      return null;
+    }
+
+    return enName;
   }
 
   // 기업 아이콘
@@ -343,20 +369,29 @@ class _ResultPageState extends State<ResultPage> {
     setState(() => _isFav = !_isFav);
   }
 
-  // 고급,초급보기 클릭 시 기억 저장
+  // 헤더카드, 평가문구 클릭 시 기억 저장
   Future<void> _loadViewMode() async {
     final sp = await SharedPreferences.getInstance();
     final saved = sp.getBool(_kResultViewMode);
+    final savedHeaderExpanded = sp.getBool(_kHeaderExpanded);
 
     if (!mounted) return;
     setState(() {
       _showAdvanced = saved ?? true; // 저장값 없으면 기본은 고급보기
+      _headerExpanded = savedHeaderExpanded ?? true; // 저장값 없으면 기본은 펼침
     });
   }
   
+  // 평가문구 토글 상태 저장
   Future<void> _saveViewMode() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setBool(_kResultViewMode, _showAdvanced);
+  }
+
+  // 헤더카드 토글 상태 저장
+  Future<void> _saveHeaderExpanded() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kHeaderExpanded, _headerExpanded);
   }
 
   // -----------------
@@ -367,6 +402,12 @@ class _ResultPageState extends State<ResultPage> {
     setState(() => _showAdvanced = !_showAdvanced);
     unawaited(_saveViewMode()); // 바꾼 상태 저장
     debugPrint('[Toggle] showAdvanced=$_showAdvanced');
+  }
+
+  void _toggleHeaderExpanded() {
+    if (!mounted) return;
+    setState(() => _headerExpanded = !_headerExpanded);
+    unawaited(_saveHeaderExpanded());
   }
 
   // ---------- 파싱 ----------
@@ -527,9 +568,11 @@ class _ResultPageState extends State<ResultPage> {
       _initF = f;
 
       // ✅ 기본 5.0이 아니라, 랭킹에서 들어왔으면 랭킹 r 사용
+      final initialRPct = (widget.initialRequiredReturnPct ?? 10.0).clamp(5.0, 20.0).toDouble();
+
       _initR = widget.useRankingSnapshot
-          ? (widget.rankingRPct ?? 5.0)
-          : 5.0;
+          ? (widget.rankingRPct ?? initialRPct)
+          : initialRPct;
 
       rPct = _initR;
 
@@ -565,8 +608,12 @@ class _ResultPageState extends State<ResultPage> {
                 : fmtWonDecimal(saved.dps, fractionDigits: fd);
           }
 
-          rPct = saved.rPct;
+          // ✅ SearchPage에서 넘어온 값이 없을 때만 저장값 복원
+          if (widget.initialRequiredReturnPct == null) {
+            rPct = saved.rPct;
+          }
         }
+        
       } else {
         _setStage(t.loadingApplyRankingSnapshot);
       }
@@ -721,13 +768,26 @@ class _ResultPageState extends State<ResultPage> {
             padding: const EdgeInsets.symmetric(horizontal: 6),
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
-          IconButton(
-            tooltip: _showAdvanced ? t.hideAdvancedView : t.showAdvancedView,
-            icon: Icon(_showAdvanced ? Icons.visibility_off : Icons.visibility),
-            onPressed: _toggleViewMode,
-            visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+
+          Tooltip(
+            message: 'N증권',
+            child: TextButton(
+              onPressed: _openNaverFinanceForCurrent,
+              style: TextButton.styleFrom(
+                foregroundColor: _accent.withAlpha(220),
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+              ),
+              child: const Text(
+                'N증권',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ),
           PopupMenuButton<String>(
             tooltip: t.moreMenu,
@@ -736,25 +796,12 @@ class _ResultPageState extends State<ResultPage> {
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             onSelected: (value) async {
               switch (value) {
-                case 'naver':
-                  await _openNaverFinanceForCurrent();
-                  break;
                 case 'pdf':
                   await _showPdfSaveSheet();
                   break;
               }
             },
             itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                value: 'naver',
-                child: Row(
-                  children: [
-                    const Icon(Icons.open_in_new),
-                    const SizedBox(width: 10),
-                    Text(_isUS ? t.openNaverGlobal : t.openNaverKr),
-                  ],
-                ),
-              ),
               PopupMenuItem<String>(
                 value: 'pdf',
                 child: Row(
@@ -847,19 +894,41 @@ class _ResultPageState extends State<ResultPage> {
     }
 
     return SafeArea(
-      // 노치/라운드/제스처 영역 + 최소 12 padding 확보
       minimum: const EdgeInsets.all(12),
       child: ListView(
-        padding: EdgeInsets.zero, 
+        padding: EdgeInsets.zero,
         children: [
           _headerCard(name, code),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+
+          if (calcError == null && result != null) ...[
+            _topQuickSummaryCard(
+              currentPrice: price,
+              r: result,
+              rating: rating,
+            ),
+            const SizedBox(height: 8),
+
+            _priceFairGauge(
+              price: price,
+              fairPrice: result.fairPrice,
+            ),
+            const SizedBox(height: 5),
+
+            Text(
+              ResultCopy.valuationStatusText(context, result.gapPct),
+              style: TextStyle(color: Colors.grey[700], fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+          ],
 
           if (rating != null) ...[
             InkWell(
               borderRadius: BorderRadius.circular(14),
               onTap: _toggleViewMode,
-              child: _showAdvanced ? _ratingCardCompact(rating) : _ratingCardLarge(rating),
+              child: _showAdvanced
+                  ? _ratingCardCompact(rating)
+                  : _ratingCardLarge(rating),
             ),
             const SizedBox(height: 8),
           ],
@@ -885,82 +954,147 @@ class _ResultPageState extends State<ResultPage> {
     final marketText = (widget.market == Market.kr) ? "KR" : "US";
     final f = _fundamentals ?? _initF;
 
+    final subtitleName = _headerSubtitleName;
+    final subtitleMeta = '$code · $marketText';
+
     return Card(
       elevation: 0,
       color: Colors.transparent,
-      child: Container(
-        decoration: _cardDeco(_cHeader),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: _toggleHeaderExpanded,
         child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border(left: BorderSide(color: _cHeader.withAlpha(170), width: 4)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          decoration: _cardDeco(_cHeader),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border(
+                left: BorderSide(color: _cHeader.withAlpha(170), width: 4),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _headerCompanyMark(size: _responsiveHeaderMarkSize(context)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "$name ($code) · $marketText",
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _headerCompanyMark(
+                          size: _responsiveHeaderMarkSize(context),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (subtitleName != null) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  _headerExpanded
+                                      ? '$subtitleName · $subtitleMeta'
+                                      : subtitleName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ] else if (_headerExpanded) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  subtitleMeta,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                          if (_originalDisplayName != null) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              "$_originalDisplayName",
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
-                        ],
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          _headerExpanded
+                              ? Icons.keyboard_arrow_up
+                              : Icons.keyboard_arrow_down,
+                          color: Colors.grey[700],
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _openFinancialStatementPage,
+                        icon: const Icon(Icons.receipt_long, size: 18),
+                        label: Text(t.viewFinancialStatements),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
                       ),
                     ),
+
+                    if (_headerExpanded) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        ResultCopy.dataSourceText(context, widget.market),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      if (f.basDt != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          ResultCopy.financialDateText(
+                            context,
+                            _fmtBasDt(f.basDt!),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                      if (_priceBasDt != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          ResultCopy.priceDateText(
+                            context,
+                            _fmtBasDt(_priceBasDt!),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ],
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  ResultCopy.dataSourceText(context, widget.market),
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-
-                if (f.basDt != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    ResultCopy.financialDateText(context, _fmtBasDt(f.basDt!)),
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-                if (_priceBasDt != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    ResultCopy.priceDateText(context, _fmtBasDt(_priceBasDt!)),
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _openFinancialStatementPage,
-                    icon: const Icon(Icons.receipt_long, size: 18),
-                    label: Text(t.viewFinancialStatements),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      minimumSize: const Size(0, 32),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -1303,7 +1437,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  // 고급 작은카드
+  // 매수평가 작은카드 
   Widget _ratingCardCompact(ValuationRating rating) {
     final a = rating.accent ?? _ratingColor(rating.level);
     final bg = rating.bg ?? a.withAlpha(6);
@@ -1329,11 +1463,28 @@ class _ResultPageState extends State<ResultPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(rating.title, style: TextStyle(fontWeight: FontWeight.bold, color: a)),
+                  Text(
+                    rating.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: a,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(rating.summary, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                  Text(
+                    rating.summary,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                    ),
+                  ),
                 ],
               ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.keyboard_arrow_down,
+              color: Colors.grey[700],
             ),
           ],
         ),
@@ -1341,7 +1492,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  // 초급 큰카드
+  // 매수평가 큰카드
   Widget _ratingCardLarge(ValuationRating rating) {
     final a = rating.accent ?? _ratingColor(rating.level);
     final bg = rating.bg ?? a.withAlpha(14);
@@ -1371,7 +1522,19 @@ class _ResultPageState extends State<ResultPage> {
                     child: Icon(_ratingIcon(rating.level), color: a),
                   ),
                   const SizedBox(width: 10),
-                  Text(rating.title, style: TextStyle(fontWeight: FontWeight.w800, color: a)),
+                  Expanded(
+                    child: Text(
+                      rating.title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: a,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.keyboard_arrow_up,
+                    color: Colors.grey[700],
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -1392,6 +1555,141 @@ class _ResultPageState extends State<ResultPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // 상단 요약카드
+  Widget _topQuickSummaryCard({
+    required double currentPrice,
+    required ValuationResult r,
+    required ValuationRating? rating,
+  }) {
+    final judgmentColor =
+        rating?.accent ?? _ratingColor(rating?.level ?? RatingLevel.neutral);
+
+    return Card(
+      elevation: 0,
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: _cResult.withAlpha(10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _cResult.withAlpha(45)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            children: [
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _topSummaryMetricBox(
+                        title: isKoLang ? '현재가' : 'Current price',
+                        value: _fmtMoney(currentPrice),
+                        subtitle: _isUS ? r'Now ($)' : 'Now (KRW)',
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _topSummaryMetricBox(
+                        title: ResultCopy.fairPriceLabel(context),
+                        value: _fmtMoney(r.fairPrice),
+                        subtitle: "BPS × (ROE / r)",
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _topSummaryMetricBox(
+                        title: ResultCopy.expectedReturnPctLabel(context),
+                        value:
+                            "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
+                        valueColor:
+                            r.expectedReturnPct >= 0 ? Colors.green : Colors.red,
+                        subtitle: ResultCopy.expectedReturnHint(context),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _topSummaryMetricBox(
+                        title: isKoLang ? '매수판단' : 'Judgement',
+                        value: rating?.title ?? (isKoLang ? '중립' : 'Neutral'),
+                        valueColor: judgmentColor,
+                        subtitle: isKoLang ? '현재 평가' : 'Current view',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _topSummaryMetricBox({
+    required String title,
+    required String value,
+    String? subtitle,
+    Color? valueColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: _cKpi.withAlpha(10),
+        border: Border.all(color: _cKpi.withAlpha(45)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: valueColor ?? Colors.black,
+              ),
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.grey[700],
+                fontSize: 10.5,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1422,174 +1720,74 @@ class _ResultPageState extends State<ResultPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-           Text(
-              ResultCopy.resultTitleLabel(context),
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Text(
+              isKoLang ? '상세 결과' : 'Detailed results',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 10),
 
-            // ✅ 초보 모드
-            if (!_showAdvanced) ...[
-              // 두 KPI 박스 높이 자동 동일화 (고정 height 제거)
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _kpiBox(
-                        title: ResultCopy.fairPriceLabel(context),
-                        value: _fmtMoney(r.fairPrice),
-                        subtitle: "BPS × (ROE / r)",
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _kpiBox(
-                        title: ResultCopy.expectedReturnPctLabel(context),
-                        value:
-                            "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
-                        valueColor:
-                            r.expectedReturnPct >= 0 ? Colors.green : Colors.red,
-                        subtitle: ResultCopy.expectedReturnHint(context),
-                      ),
-                    ),
-                  ],
-                ),
+            _sectionCard(ResultCopy.valueSectionTitle(context), [
+              _metricTile(
+                label: ResultCopy.fairPriceLabel(context),
+                value: _fmtMoney(r.fairPrice),
+                helper: "BPS × (ROE / r)",
+                icon: Icons.price_check,
               ),
-
-              const SizedBox(height: 10),
-
-              // 게이지
-              _priceFairGauge(price: currentPrice, fairPrice: r.fairPrice),
-
-              const SizedBox(height: 10),
-
-              // 게이지 아래 문구(항상 보이게)
-              Text(
-                ResultCopy.valuationStatusText(context, r.gapPct),
-                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              _metricTile(
+                label: ResultCopy.valuationStatusLabel(context),
+                value: "${r.gapPct.toStringAsFixed(1)}%",
+                helper: ResultCopy.valuationStatusHelper(context),
+                icon: Icons.bar_chart,
               ),
-              const SizedBox(height: 6),
-              Text(
-                ResultCopy.detailHintText(context),
-                style: const TextStyle(fontSize: 12),
+              _metricTile(
+                label: ResultCopy.expectedReturnPctLabel(context),
+                value: "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
+                helper: ResultCopy.expectedReturnHint(context),
+                icon: Icons.trending_up,
               ),
-            ],
-
-            // ✅ 고급 모드
-            if (_showAdvanced) ...[
-              _sectionCard(ResultCopy.valueSectionTitle(context), [
-                _metricTile(
-                  label: ResultCopy.fairPriceLabel(context),
-                  value: _fmtMoney(r.fairPrice),
-                  helper: "BPS × (ROE / r)",
-                  icon: Icons.price_check,
-                ),
-                _metricTile(
-                  label: ResultCopy.valuationStatusLabel(context),
-                  value: "${r.gapPct.toStringAsFixed(1)}%",
-                  helper: ResultCopy.valuationStatusHelper(context),
-                  icon: Icons.bar_chart,
-                ),
-                _metricTile(
-                  label: ResultCopy.expectedReturnPctLabel(context),
-                  value: "${r.expectedReturnPct >= 0 ? '+' : ''}${r.expectedReturnPct.toStringAsFixed(1)}%",
-                  helper: ResultCopy.expectedReturnHint(context),
-                  icon: Icons.trending_up,
-                ),
-              ]),
-              const SizedBox(height: 8),
-              _sectionCard(ResultCopy.profitabilitySectionTitle(context), [
-                _metricTile(
-                  label: "ROE",
-                  value: "${r.roePct.toStringAsFixed(2)}%",
-                  helper: "EPS / BPS",
-                  icon: Icons.flash_on,
-                ),
-                _metricTile(
-                  label: "ROE / r",
-                  value: r.roeOverR.toStringAsFixed(2),
-                  helper: ResultCopy.roeOverRHelper(context),
-                  icon: Icons.functions,
-                ),
-              ]),
-              const SizedBox(height: 8),
-              _sectionCard(ResultCopy.dividendSectionTitle(context), [
-                _metricTile(
-                  label: ResultCopy.dividendYieldLabel(context),
-                  value: "${r.dividendYieldPct.toStringAsFixed(2)}%",
-                  helper: isKoLang ? "DPS / 현재가" : "DPS / current price",
-                  icon: Icons.savings,
-                ),
-              ]),
-              const SizedBox(height: 8),
-              _sectionCard(ResultCopy.multiplesSectionTitle(context), [
-                _metricTile(
-                    label: "PER",
-                    value: r.per.toStringAsFixed(2),
-                    icon: Icons.calculate),
-                _metricTile(
-                    label: "PBR",
-                    value: r.pbr.toStringAsFixed(2),
-                    icon: Icons.assessment),
-              ]),
-            ],
+            ]),
+            const SizedBox(height: 8),
+            _sectionCard(ResultCopy.profitabilitySectionTitle(context), [
+              _metricTile(
+                label: "ROE",
+                value: "${r.roePct.toStringAsFixed(2)}%",
+                helper: "EPS / BPS",
+                icon: Icons.flash_on,
+              ),
+              _metricTile(
+                label: "ROE / r",
+                value: r.roeOverR.toStringAsFixed(2),
+                helper: ResultCopy.roeOverRHelper(context),
+                icon: Icons.functions,
+              ),
+            ]),
+            const SizedBox(height: 8),
+            _sectionCard(ResultCopy.dividendSectionTitle(context), [
+              _metricTile(
+                label: ResultCopy.dividendYieldLabel(context),
+                value: "${r.dividendYieldPct.toStringAsFixed(2)}%",
+                helper: isKoLang ? "DPS / 현재가" : "DPS / current price",
+                icon: Icons.savings,
+              ),
+            ]),
+            const SizedBox(height: 8),
+            _sectionCard(ResultCopy.multiplesSectionTitle(context), [
+              _metricTile(
+                label: "PER",
+                value: r.per.toStringAsFixed(2),
+                icon: Icons.calculate,
+              ),
+              _metricTile(
+                label: "PBR",
+                value: r.pbr.toStringAsFixed(2),
+                icon: Icons.assessment,
+              ),
+            ]),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _kpiBox({
-    required String title,
-    required String value,
-    Color? valueColor,
-    String? subtitle,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: _cKpi.withAlpha(12),
-        border: Border.all(color: _cKpi.withAlpha(60)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.grey[700], fontSize: 12),
-          ),
-          const SizedBox(height: 8),
-
-          // 값은 길면 자동 축소(한 줄 유지)
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              maxLines: 1,
-              softWrap: false,
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: valueColor ?? Colors.black,
-              ),
-            ),
-          ),
-
-          if (subtitle != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Colors.grey[700], fontSize: 12),
-            ),
-          ],
-        ],
       ),
     );
   }

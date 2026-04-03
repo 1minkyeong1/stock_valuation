@@ -117,13 +117,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     required String code,
     required String koName,
   }) {
-    final locale = Localizations.localeOf(context);
-
-    return SearchAlias.displayKrOriginalName(
-      code: code,
-      koName: koName,
-      locale: locale,
-    );
+    final en = SearchAlias.krEnglishName(code)?.trim();
+    if (en == null || en.isEmpty || en == koName.trim()) return null;
+    return en;
   }
 
   // 랭킹숫자 반응형 사이즈

@@ -20,11 +20,18 @@ import 'about_page.dart';
 import 'package:stock_valuation_app/services/app_backup_service.dart';
 import 'package:stock_valuation_app/services/app_backup_file_service.dart';
 import 'package:stock_valuation_app/l10n/app_localizations.dart';
+import 'package:stock_valuation_app/copy/result_copy.dart';
 
 
 class SearchPage extends StatefulWidget {
  final RepoHub hub;
-  const SearchPage({super.key, required this.hub});
+  final double? initialRequiredReturnPct;
+
+  const SearchPage({
+    super.key,
+    required this.hub,
+    this.initialRequiredReturnPct,
+  });
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -50,6 +57,9 @@ class _SearchPageState extends State<SearchPage> {
 
   final _backupService = AppBackupService();
   final _backupFileService = AppBackupFileService();
+
+  double _searchRPct = 10.0;
+  late final TextEditingController _rCtrl;
 
   // 번역
   AppLocalizations get t => AppLocalizations.of(context)!;
@@ -77,6 +87,10 @@ class _SearchPageState extends State<SearchPage> {
   void initState() {
     super.initState();
 
+    final initR = (widget.initialRequiredReturnPct ?? 10.0).clamp(5.0, 20.0);
+    _searchRPct = initR.toDouble();
+    _rCtrl = TextEditingController(text: _searchRPct.toStringAsFixed(1));
+
     // 첫 프레임 이후 로드(안전)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _loadFav();
@@ -93,6 +107,7 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _debounce?.cancel();
     _controller.dispose();
+    _rCtrl.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
@@ -125,6 +140,177 @@ class _SearchPageState extends State<SearchPage> {
     // 기본 120에서, 글자 커질수록 최대 200까지 늘림
     final h = 120.0 + (ts - 1.0) * 80.0; // ts=2.0이면 200
     return h.clamp(120.0, 200.0);
+  }
+
+  // 요구수익률
+  void _applySearchRPctFromText(String raw, {bool updateText = true}) {
+    final cleaned = raw.trim().replaceAll(',', '');
+    final v = double.tryParse(cleaned);
+
+    if (v == null) {
+      if (updateText) {
+        _rCtrl.text = _searchRPct.toStringAsFixed(1);
+      }
+      return;
+    }
+
+    final next = v.clamp(5.0, 20.0).toDouble();
+
+    setState(() {
+      _searchRPct = next;
+      if (updateText) {
+        _rCtrl.text = next.toStringAsFixed(1);
+      }
+    });
+  }
+
+  Widget _requiredReturnSearchCard({bool compact = false}) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    final titleStyle = TextStyle(
+      fontSize: compact ? 11 : 12,
+      fontWeight: FontWeight.w800,
+      color: cs.onSurface,
+    );
+
+    final textScale = MediaQuery.textScalerOf(context)
+        .scale(1.0)
+        .clamp(1.0, 2.0)
+        .toDouble();
+
+    final inputWidth =
+        ((compact ? 72.0 : 78.0) + (textScale - 1.0) * 36.0).clamp(72.0, 120.0);
+
+    return Card(
+      elevation: 0,
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surface.withAlpha(238),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withAlpha(110)),
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 10 : 12,
+            compact ? 7 : 8,
+            compact ? 10 : 12,
+            compact ? 4 : 5,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      ResultCopy.requiredReturnLabel(context),
+                      style: titleStyle,
+                    ),
+                  ),
+                  SizedBox(
+                    width: inputWidth,
+                    child: TextField(
+                      controller: _rCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.center,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d*\.?\d{0,1}$'),
+                        ),
+                      ],
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
+                        suffixText: '%',
+                        hintText: '10.0',
+                        filled: true,
+                        fillColor: Colors.white.withAlpha(190),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                          borderSide: BorderSide(
+                            color: cs.outlineVariant.withAlpha(120),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                          borderSide: BorderSide(
+                            color: _accent.withAlpha(110),
+                            width: 1.0,
+                          ),
+                        ),
+                      ),
+                      onSubmitted: (v) => _applySearchRPctFromText(v),
+                      onEditingComplete: () {
+                        _applySearchRPctFromText(_rCtrl.text);
+                        FocusScope.of(context).unfocus();
+                      },
+                      onTapOutside: (_) {
+                        _applySearchRPctFromText(_rCtrl.text);
+                        FocusScope.of(context).unfocus();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 1),
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: _accent.withAlpha(185),
+                  inactiveTrackColor: cs.outlineVariant.withAlpha(85),
+                  thumbColor: _accent.withAlpha(205),
+                  overlayColor: _accent.withAlpha(14),
+                  trackHeight: compact ? 2.0 : 2.4,
+                  thumbShape: RoundSliderThumbShape(
+                    enabledThumbRadius: compact ? 6 : 7,
+                  ),
+                  overlayShape: RoundSliderOverlayShape(
+                    overlayRadius: compact ? 10 : 12,
+                  ),
+                ),
+                child: Slider(
+                  value: _searchRPct,
+                  min: 5,
+                  max: 20,
+                  divisions: 150,
+                  label: "${_searchRPct.toStringAsFixed(1)}%",
+                  onChanged: (v) {
+                    setState(() {
+                      _searchRPct = v;
+                      _rCtrl.text = v.toStringAsFixed(1);
+                    });
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 2, right: 2, top: 0),
+                child: Row(
+                  children: [
+                    Text(
+                      "5%",
+                      style: TextStyle(fontSize: 9.5, color: Colors.grey[600]),
+                    ),
+                    const Spacer(),
+                    Text(
+                      "20%",
+                      style: TextStyle(fontSize: 9.5, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // =========================
@@ -362,6 +548,7 @@ class _SearchPageState extends State<SearchPage> {
   // 상세 페이지 이동
   // =========================
   Future<void> _openResult(StockSearchItem s, {bool recordRecent = true}) async {
+    _applySearchRPctFromText(_rCtrl.text, updateText: true);
     debugPrint('[OpenResult] start ${s.code}');
 
     // 1) 최근검색 저장은 기다리지 않음
@@ -399,7 +586,12 @@ class _SearchPageState extends State<SearchPage> {
     try {
       await nav.push(
         MaterialPageRoute(
-          builder: (_) => ResultPage(hub: widget.hub, item: s, market: _tab),
+          builder: (_) => ResultPage(
+            hub: widget.hub,
+            item: s,
+            market: _tab,
+            initialRequiredReturnPct: _searchRPct,
+          ),
         ),
       );
       debugPrint('[OpenResult] after pop');
@@ -668,11 +860,9 @@ class _SearchPageState extends State<SearchPage> {
       return en;
     }
 
-    return SearchAlias.displayKrOriginalName(
-      code: s.code,
-      koName: s.name,
-      locale: locale,
-    );
+    final en = SearchAlias.krEnglishName(s.code)?.trim();
+    if (en == null || en.isEmpty || en == s.name.trim()) return null;
+    return en;
   }
 
   // alisa 결과에도 로고 넣기 함수
@@ -1250,6 +1440,9 @@ class _SearchPageState extends State<SearchPage> {
                     children: [
                       _marketTabs(),
                       SizedBox(height: isLand ? 6 : 10),
+
+                      _requiredReturnSearchCard(compact: isLand),
+                      SizedBox(height: isLand ? 6 : 8),
 
                       _searchBox(compact: isLand),
                       SizedBox(height: isLand ? 6 : 10),
