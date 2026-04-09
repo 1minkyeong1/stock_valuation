@@ -141,6 +141,109 @@ class PriceQuote {
   });
 }
 
+class PriceChartPoint {
+  final String ym;     // 예: 2023-04
+  final String date;   // 예: 2023-04-28
+  final double close;
+
+  const PriceChartPoint({
+    required this.ym,
+    required this.date,
+    required this.close,
+  });
+
+  factory PriceChartPoint.fromJson(Map<String, dynamic> json) {
+    return PriceChartPoint(
+      ym: (json['ym'] ?? '').toString(),
+      date: (json['date'] ?? '').toString(),
+      close: (json['close'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+class FibLevel {
+  final double ratio;   // 0.0, 0.236, 0.382 ...
+  final double price;
+
+  const FibLevel({
+    required this.ratio,
+    required this.price,
+  });
+
+  String get label {
+    if (ratio == 0.0) return '0%';
+    if (ratio == 1.0) return '100%';
+    return '${(ratio * 100).toStringAsFixed(ratio == 0.5 ? 0 : 1)}%';
+  }
+
+  factory FibLevel.fromJson(Map<String, dynamic> json) {
+    return FibLevel(
+      ratio: (json['ratio'] as num?)?.toDouble() ?? 0.0,
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+
+class PriceFibChartData {
+  final String market;
+  final String code;
+  final int rangeMonths;
+
+  final List<PriceChartPoint> points;
+  final List<FibLevel> fibLevels;
+
+  final double highestPrice;
+  final String? highestDate;
+
+  final double lowestPrice;
+  final String? lowestDate;
+
+  final double currentPrice;
+  final String? currentDate;
+
+  final double positionPct; // 0~100
+
+  const PriceFibChartData({
+    required this.market,
+    required this.code,
+    required this.rangeMonths,
+    required this.points,
+    required this.fibLevels,
+    required this.highestPrice,
+    required this.highestDate,
+    required this.lowestPrice,
+    required this.lowestDate,
+    required this.currentPrice,
+    required this.currentDate,
+    required this.positionPct,
+  });
+
+  factory PriceFibChartData.fromJson(Map<String, dynamic> json) {
+    final pointsJson = (json['points'] as List?) ?? const [];
+    final fibJson = (json['fibLevels'] as List?) ?? const [];
+
+    return PriceFibChartData(
+      market: (json['market'] ?? '').toString(),
+      code: (json['code'] ?? '').toString(),
+      rangeMonths: (json['rangeMonths'] as num?)?.toInt() ?? 36,
+      points: pointsJson
+          .map((e) => PriceChartPoint.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      fibLevels: fibJson
+          .map((e) => FibLevel.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      highestPrice: (json['highestPrice'] as num?)?.toDouble() ?? 0.0,
+      highestDate: json['highestDate']?.toString(),
+      lowestPrice: (json['lowestPrice'] as num?)?.toDouble() ?? 0.0,
+      lowestDate: json['lowestDate']?.toString(),
+      currentPrice: (json['currentPrice'] as num?)?.toDouble() ?? 0.0,
+      currentDate: json['currentDate']?.toString(),
+      positionPct: (json['positionPct'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
 
 abstract class StockRepository {
   Future<List<StockSearchItem>> search(String query);
@@ -152,5 +255,7 @@ abstract class StockRepository {
   Future<StockFundamentals> getFundamentals(String code, {int? targetYear});
 
   Future<StockFinancialDetails> getFinancialDetails(String code, {int? targetYear});
+
+  Future<PriceFibChartData> getPriceFibChart(String code, {int months = 36});
 }
 

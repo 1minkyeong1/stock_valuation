@@ -59,8 +59,7 @@ android {
 }
 
 dependencies {
-    // AdMob SDK (필수)
-    implementation("com.google.android.gms:play-services-ads:25.0.0")
+    implementation("androidx.activity:activity:1.10.1")
 }
 
 flutter {

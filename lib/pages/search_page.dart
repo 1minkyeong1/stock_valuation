@@ -21,6 +21,7 @@ import 'package:stock_valuation_app/services/app_backup_service.dart';
 import 'package:stock_valuation_app/services/app_backup_file_service.dart';
 import 'package:stock_valuation_app/l10n/app_localizations.dart';
 import 'package:stock_valuation_app/copy/result_copy.dart';
+import 'package:stock_valuation_app/pages/favorite_ranking_page.dart';
 
 
 class SearchPage extends StatefulWidget {
@@ -63,6 +64,7 @@ class _SearchPageState extends State<SearchPage> {
 
   // 번역
   AppLocalizations get t => AppLocalizations.of(context)!;
+  bool get isKoLang => Localizations.localeOf(context).languageCode == 'ko';
 
   String _backupErrorText(Object e) {
     if (e is AppBackupException) {
@@ -162,6 +164,31 @@ class _SearchPageState extends State<SearchPage> {
         _rCtrl.text = next.toStringAsFixed(1);
       }
     });
+  }
+
+  // 랭킹페이지 열기
+  Future<void> _openFavoriteRanking() async {
+    _applySearchRPctFromText(_rCtrl.text);
+
+    if (_favorites.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('즐겨찾기 항목이 없습니다.')),
+      );
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FavoriteRankingPage(
+          hub: widget.hub,
+          market: _tab,
+          requiredReturnPct: _searchRPct,
+        ),
+      ),
+    );
+
+    await _loadFav();
   }
 
   Widget _requiredReturnSearchCard({bool compact = false}) {
@@ -424,7 +451,26 @@ class _SearchPageState extends State<SearchPage> {
           if (seq != _searchSeq) return;
 
           setState(() {
-            _results = _aliasGroupsToItems(aliasGroups);
+            _results = _aliasGroupsToItems(aliasGroups, market: 'US');
+            _loading = false;
+            _error = null;
+          });
+
+          FocusScope.of(context).requestFocus(_searchFocus);
+          return;
+        }
+      }
+
+      //  KR 영어 alias 다중 결과도 바로 표시
+      if (_tab == Market.kr) {
+        final krAliasGroups = SearchAlias.resolveKrGroups(q, limit: 12);
+
+        if (krAliasGroups.length >= 2) {
+          if (!mounted) return;
+          if (seq != _searchSeq) return;
+
+          setState(() {
+            _results = _aliasGroupsToItems(krAliasGroups, market: 'KRX');
             _loading = false;
             _error = null;
           });
@@ -866,12 +912,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   // alisa 결과에도 로고 넣기 함수
-  List<StockSearchItem> _aliasGroupsToItems(List<AliasGroup> groups) {
+  List<StockSearchItem> _aliasGroupsToItems(List<AliasGroup> groups, {
+    required String market,
+  }) {
     return groups.map((g) {
       return StockSearchItem(
         code: g.code,
         name: g.primaryName,
-        market: 'US',
+        market: market,
       );
     }).toList();
   }
@@ -963,6 +1011,7 @@ class _SearchPageState extends State<SearchPage> {
     VoidCallback? onClear,
     String? clearTooltip,
     Color? badgeColor,
+    Widget? extraAction,
   }) {
     final c = badgeColor ?? Theme.of(context).colorScheme.primary;
 
@@ -981,17 +1030,28 @@ class _SearchPageState extends State<SearchPage> {
               Container(
                 width: 8,
                 height: 8,
-                decoration: BoxDecoration(color: c.withAlpha(200), shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: c.withAlpha(200),
+                  shape: BoxShape.circle,
+                ),
               ),
               const SizedBox(width: 6),
               Text(
                 title,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: c),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: c,
+                ),
               ),
             ],
           ),
         ),
         const Spacer(),
+        if (extraAction != null) ...[
+          extraAction,
+          const SizedBox(width: 4),
+        ],
         if (onClear != null)
           IconButton(
             tooltip: clearTooltip ?? t.deleteAll,
@@ -999,6 +1059,49 @@ class _SearchPageState extends State<SearchPage> {
             icon: const Icon(Icons.delete_outline),
           ),
       ],
+    );
+  }
+
+  // 랭킹 버튼
+  Widget _favoriteRankingActionButton() {
+    const border = Color(0xFFCBD5E1);   // 연한 회색 테두리
+    const text = Color(0xFF334155);     // 짙은 슬레이트 글자
+    const bg = Color(0xFFF8FAFC);       // 아주 옅은 배경
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: _openFavoriteRanking,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.leaderboard_rounded,
+                size: 15,
+                color: text,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                isKoLang ? '랭킹' : 'Ranking',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: text,
+                  letterSpacing: 0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1235,7 +1338,7 @@ class _SearchPageState extends State<SearchPage> {
                     vertical: compact ? 10 : 14,
                   ),
                   filled: true,
-                  fillColor: Colors.white.withAlpha(180),
+                  fillColor: Colors.white,
                   hintText: hint,
                   hintStyle: TextStyle(
                     fontSize: compact ? 12 : 14,
@@ -1308,23 +1411,29 @@ class _SearchPageState extends State<SearchPage> {
 
           // 세로모드에서만 배너 보여줌(가로모드는 공간 확보)
           if (!compact) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: _accent.withAlpha(18),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _accent.withAlpha(55)),
-              ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.auto_awesome, size: 18, color: _accent.withAlpha(220)),
-                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(
+                      Icons.auto_awesome,
+                      size: 14,
+                      color: _accent.withAlpha(180),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       t.autoSearchHelp,
-                      style: TextStyle(color: Colors.grey[800], fontSize: 12),
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontSize: 10.5,
+                        height: 1.3,
+                      ),
                     ),
                   ),
                 ],
@@ -1425,7 +1534,13 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ],
       ),
-      bottomNavigationBar: const AdBanner(),
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        left: false,
+        right: false,
+        maintainBottomViewPadding: true,
+        child: AdBanner(),
+      ),
       body: SafeArea(
         child: Container(
           color: _accent.withAlpha(8),
@@ -1474,6 +1589,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _historyList() {
     final stripH = _miniStripHeight(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1527,12 +1643,15 @@ class _SearchPageState extends State<SearchPage> {
             onClear: _confirmClearFavorites,
             clearTooltip: t.favoritesDeleteAllTooltip,
             badgeColor: Colors.purple,
+            extraAction: _favoriteRankingActionButton(),
           ),
           const SizedBox(height: 8),
           ...List.generate(_favorites.length, (i) {
             final s = _favorites[i];
             return Padding(
-              padding: EdgeInsets.only(bottom: i == _favorites.length - 1 ? 0 : 8),
+              padding: EdgeInsets.only(
+                bottom: i == _favorites.length - 1 ? 0 : 8,
+              ),
               child: _favoriteListTile(
                 s,
                 onLongPress: () => _confirmDeleteFavorite(s),

@@ -27,7 +27,7 @@ class RepoHub {
     return _repo(m).getFundamentals(codeOrSymbol, targetYear: targetYear);
   }
 
-    Future<PriceQuote> getPriceQuote(Market market, String codeOrSymbol) {
+  Future<PriceQuote> getPriceQuote(Market market, String codeOrSymbol) {
     return _repo(market).getPriceQuote(codeOrSymbol);
   }
 
@@ -37,5 +37,13 @@ class RepoHub {
     int? targetYear,
   }) {
     return _repo(market).getFinancialDetails(code, targetYear: targetYear);
+  }
+
+  Future<PriceFibChartData> getPriceFibChart(
+    Market market,
+    String code, {
+    int months = 36,
+  }) {
+    return _repo(market).getPriceFibChart(code, months: months);
   }
 }

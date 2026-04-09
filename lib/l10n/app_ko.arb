@@ -215,10 +215,7 @@
   },
 
   "favorite": "즐겨찾기",
-  "showAdvancedView": "고급보기 보기",
-  "hideAdvancedView": "고급보기 숨기기",
-  "openNaverKr": "N증권 열기",
-  "openNaverGlobal": "N해외검색 열기",
+  "openNaverKr": "N증권",
   "retry": "다시 시도",
   "loadingPriceStart": "가격 조회 시작",
   "loadingPriceTimeout": "가격 조회 타임아웃(8s)",

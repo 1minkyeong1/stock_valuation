@@ -1022,6 +1022,29 @@ class UsFmpRepository implements StockRepository {
       if (dbg) debugPrint('[FMP] getFundamentals END symbol=$symbol');
     }
   }
+
+  // 피보나치 그래프
+  @override
+  Future<PriceFibChartData> getPriceFibChart(
+    String code, {
+    int months = 36,
+  }) async {
+    final symbol = code.trim().toUpperCase();
+    if (symbol.isEmpty) {
+      throw Exception('Empty symbol');
+    }
+
+    final res = await _fmp.priceFibChart(
+      symbol: symbol,
+      months: months,
+    );
+
+    if (res['ok'] != true) {
+      throw Exception('price fib chart failed: ${(res['error'] ?? 'unknown').toString()}');
+    }
+
+    return PriceFibChartData.fromJson(res);
+  }
 }
 
 class _CacheEntry {

@@ -1,5 +1,3 @@
-// lib/models/ranking_models.dart
-
 double? _asDoubleNullable(dynamic v) {
   if (v == null) return null;
   if (v is num) return v.toDouble();
@@ -30,9 +28,9 @@ class KrRankItem {
   final String market;
 
   final num? price;
-  final num? change; 
+  final num? change;
   final num? changePct;
-  final String? logoUrl; 
+  final String? logoUrl;
 
   final num? per;
   final num? pbr;
@@ -40,6 +38,10 @@ class KrRankItem {
   final num? bps;
   final num? dps;
   final num? score;
+
+  final num? fairPrice;
+  final num? expectedReturnPct;
+  final num? gapPct;
 
   KrRankItem({
     required this.code,
@@ -55,6 +57,9 @@ class KrRankItem {
     this.bps,
     this.dps,
     this.score,
+    this.fairPrice,
+    this.expectedReturnPct,
+    this.gapPct,
   });
 
   factory KrRankItem.fromJson(Map<String, dynamic> j) {
@@ -65,13 +70,16 @@ class KrRankItem {
     final code = cleanedCode.padLeft(6, '0');
 
     final price = _asNumNullable(j['price']);
-    final change = _asNumNullable(j['change']) ?? _asNumNullable(j['prdy_vrss']);
+    final change =
+        _asNumNullable(j['change']) ?? _asNumNullable(j['prdy_vrss']);
     final changePct =
         _asNumNullable(j['changePct']) ?? _asNumNullable(j['prdy_ctrt']);
 
     return KrRankItem(
       code: code,
-      name: (j['name'] ?? j['nameKo'] ?? j['company'] ?? code).toString().trim(),
+      name: (j['name'] ?? j['nameKo'] ?? j['company'] ?? code)
+          .toString()
+          .trim(),
       market: (j['market'] ?? 'KRX').toString().trim(),
       price: price,
       change: change,
@@ -83,7 +91,11 @@ class KrRankItem {
       pbr: _asNumNullable(j['pbr']),
       eps: _asNumNullable(j['eps']),
       bps: _asNumNullable(j['bps']),
+      dps: _asNumNullable(j['dps']),
       score: _asNumNullable(j['score']),
+      fairPrice: _asNumNullable(j['fairPrice']),
+      expectedReturnPct: _asNumNullable(j['expectedReturnPct']),
+      gapPct: _asNumNullable(j['gapPct']),
     );
   }
 }
@@ -107,7 +119,8 @@ class UsRankItem {
   final num? divYieldPct;
 
   final num? fairPrice;
-  final num? undervaluePct;
+  final num? expectedReturnPct;
+  final num? gapPct;
 
   UsRankItem({
     required this.tickerDisplay,
@@ -124,7 +137,8 @@ class UsRankItem {
     this.pbr,
     this.divYieldPct,
     this.fairPrice,
-    this.undervaluePct,
+    this.expectedReturnPct,
+    this.gapPct,
   });
 
   factory UsRankItem.fromJson(Map<String, dynamic> j) {
@@ -154,9 +168,11 @@ class UsRankItem {
       dps: _asNumNullable(j['dps']),
       per: _asNumNullable(j['per']),
       pbr: _asNumNullable(j['pbr']),
-      divYieldPct: _asNumNullable(j['divYieldPct']),
+      divYieldPct: _asNumNullable(j['dividendYieldPct']) ??
+          _asNumNullable(j['divYieldPct']),
       fairPrice: _asNumNullable(j['fairPrice']),
-      undervaluePct: _asNumNullable(j['undervaluePct']),
+      expectedReturnPct: _asNumNullable(j['expectedReturnPct']),
+      gapPct: _asNumNullable(j['gapPct']),
     );
   }
 }
@@ -168,16 +184,11 @@ class QuoteLite {
 
   QuoteLite({required this.price, required this.change, required this.changePct});
 
-  /// ✅ KR 시세 응답 보강:
-  /// - Worker가 change/changePct로 주면 그대로 사용
-  /// - KIS 형태(prdy_vrss, prdy_ctrt)도 흡수
-  /// - (가능하면) sign 코드(prdy_vrss_sign)가 있으면 하락/상승 부호 보정
   static QuoteLite fromKrPrice(Map<String, dynamic> m) {
     double toD(dynamic v) => _asDoubleNullable(v) ?? 0.0;
 
     final price = toD(m['price']);
 
-    // change
     double ch = 0.0;
     if (m.containsKey('change')) {
       ch = toD(m['change']);
@@ -185,7 +196,6 @@ class QuoteLite {
       ch = toD(m['prdy_vrss']);
     }
 
-    // changePct
     double cp = 0.0;
     if (m.containsKey('changePct')) {
       cp = toD(m['changePct']);
@@ -193,12 +203,9 @@ class QuoteLite {
       cp = toD(m['prdy_ctrt']);
     }
 
-    // ✅ sign 보정(있을 때만)
-    // KIS sign 코드가 내려오는 형태면(예: prdy_vrss_sign) 부호를 맞춰줌
-    // (환경에 따라 코드 정의가 다를 수 있어, 다운 후보를 넓게 잡음)
     final sign = (m['prdy_vrss_sign'] ?? m['sign'] ?? '').toString().trim();
     if (sign.isNotEmpty) {
-      final downCodes = {'4', '5'}; // 필요 시 Worker/KIS 문서에 맞춰 조정
+      final downCodes = {'4', '5'};
       final upCodes = {'1', '2'};
       if (downCodes.contains(sign)) ch = -ch.abs();
       if (upCodes.contains(sign)) ch = ch.abs();
@@ -207,7 +214,6 @@ class QuoteLite {
     return QuoteLite(price: price, change: ch, changePct: cp);
   }
 
-  /// ✅ FMP quote array: [{ price, change, changesPercentage }]
   static QuoteLite? fromFmpQuoteArray(dynamic obj) {
     if (obj is! List || obj.isEmpty) return null;
     final row = obj.first;

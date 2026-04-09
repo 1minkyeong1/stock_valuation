@@ -201,6 +201,7 @@ class _AdBannerState extends State<AdBanner> with WidgetsBindingObserver {
 
         return SafeArea(
           top: false,
+          maintainBottomViewPadding: true,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             height: h,

@@ -177,5 +177,23 @@ class FmpClient {
     return list.take(limit).toList();
   }
 
+  // 피보나치 그래프
+  Future<Map<String, dynamic>> priceFibChart({
+    required String symbol,
+    int months = 36,
+  }) async {
+    final body = await _getJson('/fmp/price-fib', {
+      'symbol': symbol.trim().toUpperCase(),
+      'months': '$months',
+    });
+
+    if (body is Map) return Map<String, dynamic>.from(body);
+    return {
+      'ok': false,
+      'symbol': symbol,
+      'error': 'BAD_RESPONSE_TYPE',
+    };
+  }
+
   void close() => _http.close();
 }

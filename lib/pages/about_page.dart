@@ -131,195 +131,198 @@ class _AboutPageState extends State<AboutPage> {
       appBar: AppBar(
         title: Text(t.aboutApp),
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 18),
-        children: [
-          const SizedBox(height: 18),
-          Center(
-            child: Column(
-              children: [
-                Image.asset(
-                  'assets/branding/company_logo.png',
-                  width: 95,
-                  height: 37,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Icon(
-                    Icons.image_not_supported_outlined,
-                    size: 48,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  companyName,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Text(
-                    t.companyDescription,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.black54),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  t.versionLabel(versionText),
-                  style: const TextStyle(color: Colors.black54),
-                ),
-                if (AppUpdateService.hasUpdate) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withAlpha(18),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Colors.orange.withAlpha(80)),
-                    ),
-                    child: Text(
-                      t.updateAvailableBadge,
-                      style: const TextStyle(
-                        color: Colors.orange,
-                        fontWeight: FontWeight.w700,
-                      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 18),
+            children: [
+              const SizedBox(height: 18),
+              Center(
+                child: Column(
+                  children: [
+                  Image.asset(
+                    'assets/branding/company_logo.png',
+                    width: 95,
+                    height: 37,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.image_not_supported_outlined,
+                      size: 48,
                     ),
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: 160,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        await AppUpdateService.startImmediateUpdate();
-                      },
-                      child: Text(t.updateFromAbout),
+                  const Text(
+                    companyName,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    t.updateCheckInAboutHint,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          const Divider(height: 1),
-
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text(
-              t.contact,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.email_outlined),
-            title: Text(t.emailInquiry),
-            subtitle: const Text(supportEmail),
-            onTap: () => _sendEmail(
-              supportEmail,
-              subject: t.appInquirySubject,
-            ),
-          ),
-
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text(
-              t.update,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          ListTile(
-            leading: Icon(
-              Icons.system_update_alt,
-              color: AppUpdateService.hasUpdate ? Colors.red : null,
-            ),
-            title: Text(
-              AppUpdateService.hasUpdate
-                  ? t.updateAvailableMenuTitle
-                  : t.checkForUpdates,
-              style: TextStyle(
-                color: AppUpdateService.hasUpdate ? Colors.red : null,
-                fontWeight:
-                    AppUpdateService.hasUpdate ? FontWeight.w700 : FontWeight.normal,
-              ),
-            ),
-            subtitle: Text(
-              AppUpdateService.hasUpdate
-                  ? t.updateAvailableMenuSubtitle
-                  : t.installLatestVersion,
-            ),
-            trailing: AppUpdateService.hasUpdate
-                ? Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withAlpha(18),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Colors.red.withAlpha(80)),
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
                     child: Text(
-                      t.updateAvailableBadge,
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                      t.companyDescription,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    t.versionLabel(versionText),
+                    style: const TextStyle(color: Colors.black54),
+                  ),
+                  if (AppUpdateService.hasUpdate) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withAlpha(18),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.orange.withAlpha(80)),
+                      ),
+                      child: Text(
+                        t.updateAvailableBadge,
+                        style: const TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  )
-                : null,
-            onTap: () async {
-              if (AppUpdateService.hasUpdate) {
-                await AppUpdateService.startImmediateUpdate();
-              } else {
-                await _openUrl(androidStoreUrl);
-              }
-            },
-          ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: 160,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          await AppUpdateService.startImmediateUpdate();
+                        },
+                        child: Text(t.updateFromAbout),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      t.updateCheckInAboutHint,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Divider(height: 1),
 
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text(
-              t.misc,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: Text(
+                t.contact,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.description_outlined),
-            title: Text(t.termsOfService),
-            onTap: () => _showTextDialog(
-              t.termsOfService,
-              TermsText.content(context),
+            ListTile(
+              leading: const Icon(Icons.email_outlined),
+              title: Text(t.emailInquiry),
+              subtitle: const Text(supportEmail),
+              onTap: () => _sendEmail(
+                supportEmail,
+                subject: t.appInquirySubject,
+              ),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.privacy_tip_outlined),
-            title: Text(t.privacyPolicy),
-            onTap: () => _showTextDialog(
-              t.privacyPolicy,
-              PrivacyText.content(context),
-              url: PrivacyText.url,
+
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: Text(
+                t.update,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.code),
-            title: Text(t.openSourceLicenses),
-            onTap: () => showLicensePage(
-              context: context,
-              applicationName: t.appTitle,
-              applicationVersion: versionText,
+            ListTile(
+              leading: Icon(
+                Icons.system_update_alt,
+                color: AppUpdateService.hasUpdate ? Colors.red : null,
+              ),
+              title: Text(
+                AppUpdateService.hasUpdate
+                    ? t.updateAvailableMenuTitle
+                    : t.checkForUpdates,
+                style: TextStyle(
+                  color: AppUpdateService.hasUpdate ? Colors.red : null,
+                  fontWeight:
+                      AppUpdateService.hasUpdate ? FontWeight.w700 : FontWeight.normal,
+                ),
+              ),
+              subtitle: Text(
+                AppUpdateService.hasUpdate
+                    ? t.updateAvailableMenuSubtitle
+                    : t.installLatestVersion,
+              ),
+              trailing: AppUpdateService.hasUpdate
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withAlpha(18),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.red.withAlpha(80)),
+                      ),
+                      child: Text(
+                        t.updateAvailableBadge,
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    )
+                  : null,
+              onTap: () async {
+                if (AppUpdateService.hasUpdate) {
+                  await AppUpdateService.startImmediateUpdate();
+                } else {
+                  await _openUrl(androidStoreUrl);
+                }
+              },
             ),
-          ),
-        ],
+
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: Text(
+                t.misc,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: Text(t.termsOfService),
+              onTap: () => _showTextDialog(
+                t.termsOfService,
+                TermsText.content(context),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.privacy_tip_outlined),
+              title: Text(t.privacyPolicy),
+              onTap: () => _showTextDialog(
+                t.privacyPolicy,
+                PrivacyText.content(context),
+                url: PrivacyText.url,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.code),
+              title: Text(t.openSourceLicenses),
+              onTap: () => showLicensePage(
+                context: context,
+                applicationName: t.appTitle,
+                applicationVersion: versionText,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

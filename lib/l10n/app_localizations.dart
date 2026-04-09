@@ -776,29 +776,11 @@ abstract class AppLocalizations {
   /// **'Favorite'**
   String get favorite;
 
-  /// No description provided for @showAdvancedView.
-  ///
-  /// In en, this message translates to:
-  /// **'Show advanced view'**
-  String get showAdvancedView;
-
-  /// No description provided for @hideAdvancedView.
-  ///
-  /// In en, this message translates to:
-  /// **'Hide advanced view'**
-  String get hideAdvancedView;
-
   /// No description provided for @openNaverKr.
   ///
   /// In en, this message translates to:
-  /// **'Open Naver Securities'**
+  /// **'Naver'**
   String get openNaverKr;
-
-  /// No description provided for @openNaverGlobal.
-  ///
-  /// In en, this message translates to:
-  /// **'Open Naver Global Search'**
-  String get openNaverGlobal;
 
   /// No description provided for @retry.
   ///

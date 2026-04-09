@@ -43,6 +43,7 @@ class ResultPdfLabels {
   final String shareTextSuffix;
   final String platformNotSupportedText;
   final String fontLoadErrorText;
+  final String explanationSectionTitle;
 
   const ResultPdfLabels({
     required this.inputSectionTitle,
@@ -75,6 +76,7 @@ class ResultPdfLabels {
     required this.shareTextSuffix,
     required this.platformNotSupportedText,
     required this.fontLoadErrorText,
+    required this.explanationSectionTitle,
   });
 
   String shareText(String name) => '$name $shareTextSuffix';
@@ -118,6 +120,7 @@ class ResultPdfData {
   final String? equityText;
   final String? liabilitiesText;
   final String? fsSourceText;
+  final List<String>? explanationParagraphs;
 
   final ResultPdfLabels labels;
 
@@ -152,6 +155,8 @@ class ResultPdfData {
     this.equityText,
     this.liabilitiesText,
     this.fsSourceText,
+    this.explanationParagraphs,
+
     required this.labels,
   });
 }
@@ -275,6 +280,25 @@ class ResultPdfService {
                       style: const pw.TextStyle(fontSize: 11),
                     ),
                   ),
+              ],
+            ),
+          ],
+
+          if (data.explanationParagraphs != null &&
+              data.explanationParagraphs!.isNotEmpty) ...[
+            pw.SizedBox(height: 9),
+            _section(
+              labels.explanationSectionTitle,
+              [
+                ...data.explanationParagraphs!.map(
+                  (p) => pw.Padding(
+                    padding: const pw.EdgeInsets.only(bottom: 6),
+                    child: pw.Text(
+                      p,
+                      style: const pw.TextStyle(fontSize: 10.5, height: 1.4),
+                    ),
+                  ),
+                ),
               ],
             ),
           ],

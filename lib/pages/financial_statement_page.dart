@@ -261,6 +261,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
 
       // SafeArea + minimum padding으로 좌/우 “잘림(노치/라운드)” 방지
       body: SafeArea(
+        top: false,
         minimum: pad,
         child: _error != null
             ? _errorView()

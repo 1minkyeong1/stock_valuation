@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 
 import 'package:stock_valuation_app/utils/finance_rules.dart';
 import 'package:stock_valuation_app/utils/money_input_formatter.dart';
+import 'package:stock_valuation_app/widgets/common/mini_help_tip.dart';
 
 class MetricFieldWithBadge extends StatelessWidget {
   final bool isUS;
   final String label; // EPS/BPS/DPS
   final TextEditingController controller;
   final void Function(String) onChanged;
+  final String? helpMessage;
 
   const MetricFieldWithBadge({
     super.key,
@@ -17,6 +19,7 @@ class MetricFieldWithBadge extends StatelessWidget {
     required this.label,
     required this.controller,
     required this.onChanged,
+    this.helpMessage,
   });
 
   @override
@@ -58,7 +61,22 @@ class MetricFieldWithBadge extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                if (helpMessage != null) ...[
+                  const SizedBox(width: 4),
+                  MiniHelpTip(message: helpMessage!),
+                ],
+              ],
+            ),
             const SizedBox(width: 8),
             if (showLoss)
               _lossBadge()

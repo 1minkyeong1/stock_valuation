@@ -18,6 +18,7 @@ import '../utils/search_alias.dart';
 import '../services/ad_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../l10n/app_localizations.dart';
+import 'package:flutter/services.dart';
 
 const String kWorkerBaseUrl = String.fromEnvironment(
   'WORKER_BASE_URL',
@@ -66,6 +67,15 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   final TextEditingController _krRankSearchCtrl = TextEditingController();
   final TextEditingController _usRankSearchCtrl = TextEditingController();
 
+  late final TextEditingController _krRCtrl;
+  late final TextEditingController _usRCtrl;
+
+  static const double _krBaseRPct = 15.0;
+  static const double _usBaseRPct = 10.0;
+
+  double _krRPct = _krBaseRPct;
+  double _usRPct = _usBaseRPct;
+
   String _krRankQuery = '';
   String _usRankQuery = '';
 
@@ -87,16 +97,6 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
       return '${it.tickerDisplay} · ${it.name}';
     }
     return it.tickerDisplay;
-  }
-
-  Uri _krRankUri() {
-    return Uri.parse('$kWorkerBaseUrl/rankings/kr').replace(
-      queryParameters: {
-        'loss': '0',
-        'limit': '200',
-        'market': _krBoard,
-      },
-    );
   }
 
   // 한글 (영어매핑)
@@ -138,12 +138,30 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     return (base + (ts - 1.0) * step).clamp(base, max).toDouble();
   }
 
+  Uri _krRankUri() {
+    return Uri.parse('$kWorkerBaseUrl/rankings/kr').replace(
+      queryParameters: {
+        'loss': '0',
+        'limit': '200',
+        'market': _krBoard,
+        'rPct': _krBaseRPct.toStringAsFixed(1),
+      },
+    );
+  }
+
   Uri _krQuoteUri(String code6) =>
       Uri.parse('$kWorkerBaseUrl/kr/price?code=$code6');
 
-  Uri _usRankUri() => Uri.parse(
-        '$kWorkerBaseUrl/rankings/us?group=$_usGroup&loss=0&limit=200',
-      );
+  Uri _usRankUri() {
+    return Uri.parse('$kWorkerBaseUrl/rankings/us').replace(
+      queryParameters: {
+        'group': _usGroup,
+        'loss': '0',
+        'limit': '200',
+        'rPct': _usBaseRPct.toStringAsFixed(1),
+      },
+    );
+  }
 
   Uri _usQuoteUri(String tickerFmp) =>
       Uri.parse('$kWorkerBaseUrl/fmp/quote?symbol=$tickerFmp');
@@ -156,6 +174,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
     _krRankSearchCtrl.text = _krRankQuery;
     _usRankSearchCtrl.text = _usRankQuery;
+
+    _krRCtrl = TextEditingController(text: _krRPct.toStringAsFixed(1));
+    _usRCtrl = TextEditingController(text: _usRPct.toStringAsFixed(1));
 
     _tab.addListener(() {
       if (_tab.indexIsChanging) return;
@@ -178,6 +199,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   void dispose() {
     _krRankSearchCtrl.dispose();
     _usRankSearchCtrl.dispose();
+    _krRCtrl.dispose();
+    _usRCtrl.dispose();
     _tab.dispose();
     super.dispose();
   }
@@ -205,12 +228,11 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   }
 
   String _rankingBasisText(bool isKr) {
+    final r = isKr ? _krRPct : _usRPct;
     if (_isKo) {
-      return isKr ? '요구수익률 15% 기준' : '요구수익률 10% 기준';
+      return '요구수익률 ${r.toStringAsFixed(1)}% 기준';
     }
-    return isKr
-        ? 'Based on required return 15%'
-        : 'Based on required return 10%';
+    return 'Based on required return ${r.toStringAsFixed(1)}%';
   }
 
   String _rankingUpdatedText(DateTime? fetchedAt, bool isKr) {
@@ -264,11 +286,11 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           item: item,
           market: Market.kr,
           useRankingSnapshot: true,
-          rankingPrice: it.price?.toDouble(),
+          rankingPrice: _krQuotes[it.code]?.price ?? it.price?.toDouble(),
           rankingEps: it.eps?.toDouble(),
           rankingBps: it.bps?.toDouble(),
           rankingDps: it.dps?.toDouble(),
-          rankingRPct: 15.0,
+          rankingRPct: _krRPct,
         ),
       ),
     );
@@ -313,11 +335,11 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           item: item,
           market: Market.us,
           useRankingSnapshot: true,
-          rankingPrice: it.price?.toDouble(),
+          rankingPrice: _usQuotes[it.tickerFmp]?.price ?? it.price?.toDouble(),
           rankingEps: it.eps?.toDouble(),
           rankingBps: it.bps?.toDouble(),
           rankingDps: it.dps?.toDouble(),
-          rankingRPct: 10.0,
+          rankingRPct: _usRPct,
         ),
       ),
     );
@@ -565,6 +587,84 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     }
   }
 
+  // 계산 헬퍼
+  void _setRankingRPct(
+    double value, {
+    required bool isKr,
+    bool updateText = true,
+  }) {
+    final next = value.clamp(5.0, 20.0).toDouble();
+
+    setState(() {
+      if (isKr) {
+        _krRPct = next;
+        if (updateText) {
+          _krRCtrl.text = next.toStringAsFixed(1);
+        }
+      } else {
+        _usRPct = next;
+        if (updateText) {
+          _usRCtrl.text = next.toStringAsFixed(1);
+        }
+      }
+    });
+  }
+
+  void _applyRankingRPctFromText(
+    String raw, {
+    required bool isKr,
+    bool updateText = true,
+  }) {
+    final cleaned = raw.trim().replaceAll(',', '');
+    final v = double.tryParse(cleaned);
+
+    if (v == null) {
+      if (updateText) {
+        if (isKr) {
+          _krRCtrl.text = _krRPct.toStringAsFixed(1);
+        } else {
+          _usRCtrl.text = _usRPct.toStringAsFixed(1);
+        }
+      }
+      return;
+    }
+
+    _setRankingRPct(v, isKr: isKr, updateText: updateText);
+  }
+
+  // 적정가로부터 기대수익률 재계산
+  double? _expectedFromFairPrice({
+    required double? price,
+    required double? fairPrice,
+  }) {
+    if (price == null || fairPrice == null) return null;
+    if (price <= 0 || fairPrice <= 0) return null;
+
+    final v = ((fairPrice - price) / price) * 100;
+    if (!v.isFinite) return null;
+    return v;
+  }
+
+  double? _scaledFairPrice({
+    required double? baseFairPrice,
+    required double baseRPct,
+    required double currentRPct,
+  }) {
+    if (baseFairPrice == null) return null;
+    if (baseFairPrice <= 0 || baseRPct <= 0 || currentRPct <= 0) return null;
+
+    final v = baseFairPrice * (baseRPct / currentRPct);
+    if (!v.isFinite || v <= 0) return null;
+    return v;
+  }
+
+  double? _krLivePrice(KrRankItem it) =>
+      _krQuotes[it.code]?.price ?? it.price?.toDouble();
+
+  double? _usLivePrice(UsRankItem it) =>
+      _usQuotes[it.tickerFmp]?.price ?? it.price?.toDouble();
+
+
   // 추가 helper
 
   List<KrRankItem> get _krVisibleItems {
@@ -604,49 +704,35 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           it.tickerFmp.toLowerCase().contains(q) ||
           koName.toLowerCase().contains(q);
     }).toList();
-  }
-
-  int _krOriginalRank(KrRankItem item) {
-    final idx = _krItems.indexWhere((x) => x.code == item.code);
-    return idx >= 0 ? idx + 1 : 0;
-  }
-
-  int _usOriginalRank(UsRankItem item) {
-    final idx = _usItems.indexWhere((x) => x.tickerFmp == item.tickerFmp);
-    return idx >= 0 ? idx + 1 : 0;
-  }
-
-  //
-
-  Color _diffColor(ColorScheme cs, double diff) {
-    if (diff > 0) return Colors.red;
-    if (diff < 0) return Colors.blue;
-    return cs.onSurfaceVariant;
-  }
-
-  IconData? _diffIcon(double diff) {
-    if (diff > 0) return Icons.arrow_drop_up;
-    if (diff < 0) return Icons.arrow_drop_down;
-    return null;
-  }
-
-  String _signed(String s, double v) => v > 0 ? '+$s' : s;
+  }  
 
   Widget _trailingKr(KrRankItem it) {
-    final cs = Theme.of(context).colorScheme;
+    final price = _krLivePrice(it);
+    final fairPrice = _scaledFairPrice(
+      baseFairPrice: it.fairPrice?.toDouble(),
+      baseRPct: _krBaseRPct,
+      currentRPct: _krRPct,
+    );
+    final expected = _expectedFromFairPrice(
+      price: price,
+      fairPrice: fairPrice,
+    );
 
-    final q = _krQuotes[it.code];
-    final price = q?.price ?? it.price?.toDouble();
+    final expectedColor = expected == null
+        ? Colors.grey
+        : (expected >= 0 ? Colors.red : Colors.blue);
 
-    final change = q?.change ?? it.change?.toDouble();
-    final changePct = q?.changePct ?? it.changePct?.toDouble();
+    final expectedText = expected == null
+        ? '-'
+        : '${expected >= 0 ? '+' : ''}${expected.toStringAsFixed(1)}%';
 
-    if (price == null) return const SizedBox.shrink();
+    final priceText = price == null
+        ? '-'
+        : fmtWonDecimal(price, fractionDigits: 0);
 
-    final hasDiff = (change != null) && (changePct != null);
-    final diff = change ?? 0.0;
-    final color = _diffColor(cs, diff);
-    final icon = _diffIcon(diff);
+    final fairText = fairPrice == null
+        ? '-'
+        : fmtWonDecimal(fairPrice, fractionDigits: 0);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -657,70 +743,59 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerRight,
           child: Text(
-            fmtWon(price),
+            expectedText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
               fontSize: 16,
+              color: expectedColor,
             ),
           ),
         ),
-        const SizedBox(height: 2),
-        if (hasDiff)
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) Icon(icon, size: 18, color: color),
-                Text(
-                  '${_signed(fmtWon(diff), diff)} (${changePct.toStringAsFixed(2)}%)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              t.previousDayChangeNone,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
+        const SizedBox(height: 6),
+        _priceTag(
+          label: _isKo ? '현재가' : 'Price',
+          value: priceText,
+          color: Colors.blueGrey,
+        ),
+        const SizedBox(height: 4),
+        _priceTag(
+          label: _isKo ? '적정가' : 'Fair',
+          value: fairText,
+          color: Colors.green,
+        ),
       ],
     );
   }
 
   Widget _trailingUs(UsRankItem it) {
-    final cs = Theme.of(context).colorScheme;
+    final price = _usLivePrice(it);
+    final fairPrice = _scaledFairPrice(
+      baseFairPrice: it.fairPrice?.toDouble(),
+      baseRPct: _usBaseRPct,
+      currentRPct: _usRPct,
+    );
+    final expected = _expectedFromFairPrice(
+      price: price,
+      fairPrice: fairPrice,
+    );
 
-    final q = _usQuotes[it.tickerFmp];
-    final price = q?.price ?? it.price?.toDouble();
+    final expectedColor = expected == null
+        ? Colors.grey
+        : (expected >= 0 ? Colors.red : Colors.blue);
 
-    final change = q?.change ?? it.change?.toDouble();
-    final changePct = q?.changePct ?? it.changePct?.toDouble();
+    final expectedText = expected == null
+        ? '-'
+        : '${expected >= 0 ? '+' : ''}${expected.toStringAsFixed(1)}%';
 
-    if (price == null) return const SizedBox.shrink();
+    final priceText = price == null
+        ? '-'
+        : fmtUsdDecimal(price, fractionDigits: 2);
 
-    final hasDiff = (change != null) && (changePct != null);
-    final diff = change ?? 0.0;
-    final color = _diffColor(cs, diff);
-    final icon = _diffIcon(diff);
+    final fairText = fairPrice == null
+        ? '-'
+        : fmtUsdDecimal(fairPrice, fractionDigits: 2);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -731,51 +806,28 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerRight,
           child: Text(
-            '\$${price.toStringAsFixed(2)}',
+            expectedText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
               fontSize: 16,
+              color: expectedColor,
             ),
           ),
         ),
-        const SizedBox(height: 2),
-        if (hasDiff)
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) Icon(icon, size: 18, color: color),
-                Text(
-                  '${diff > 0 ? '+' : ''}\$${diff.toStringAsFixed(2)} (${changePct.toStringAsFixed(2)}%)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              t.changeNone,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
+        const SizedBox(height: 6),
+        _priceTag(
+          label: _isKo ? '현재가' : 'Price',
+          value: priceText,
+          color: Colors.blueGrey,
+        ),
+        const SizedBox(height: 4),
+        _priceTag(
+          label: _isKo ? '적정가' : 'Fair',
+          value: fairText,
+          color: Colors.blue,
+        ),
       ],
     );
   }
@@ -979,7 +1031,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
-                  width: 128,
+                  width: 160,
                   child: trailing,
                 ),
               ],
@@ -1171,7 +1223,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         }
 
         final it = visible[i - 1];
-        final rank = _krOriginalRank(it);
+        final rank = i;
 
         final displayName = _displayRankingName(
           code: it.code,
@@ -1259,7 +1311,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         }
 
         final it = visible[i - 1];
-        final rank = _usOriginalRank(it);
+        final rank = i;
 
         return _rankCardTile(
           rank: rank,
@@ -1334,44 +1386,47 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Scaffold(
-        appBar: AppBar(
-          toolbarHeight: 70,
-          titleSpacing: 18,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          title: Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              t.rankingPageTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontSize: 19,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.2,
-                height: 1.15,
-              ),
+    return Scaffold(
+      appBar: AppBar(
+        toolbarHeight: 70,
+        titleSpacing: 18,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            t.rankingPageTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
+              height: 1.15,
             ),
           ),
-          bottom: _buildAppBarBottom(),
-          actions: [
-            IconButton(
-              tooltip: t.search,
-              icon: const Icon(Icons.search),
-              onPressed: _openSearch,
-            ),
-            IconButton(
-              tooltip: t.refresh,
-              icon: const Icon(Icons.refresh),
-              onPressed: _refreshCurrent,
-            ),
-          ],
         ),
-        body: Column(
+        bottom: _buildAppBarBottom(),
+        actions: [
+          IconButton(
+            tooltip: t.search,
+            icon: const Icon(Icons.search),
+            onPressed: _openSearch,
+          ),
+          IconButton(
+            tooltip: t.refresh,
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshCurrent,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        bottom: true,
+        child: Column(
           children: [
             _buildPinnedRankSearchBox(),
+            _requiredReturnRankingCard(),
             Expanded(
               child: TabBarView(
                 controller: _tab,
@@ -1502,6 +1557,201 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
               ),
             );
                       },
+        ),
+      ),
+    );
+  }
+
+  Widget _requiredReturnRankingCard() {
+    final isKr = _tab.index == 0;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    final ctrl = isKr ? _krRCtrl : _usRCtrl;
+    final r = isKr ? _krRPct : _usRPct;
+    final accent = isKr ? Colors.green : Colors.blue;
+
+    final textScale = MediaQuery.textScalerOf(context)
+        .scale(1.0)
+        .clamp(1.0, 2.0)
+        .toDouble();
+
+    final inputWidth = (78.0 + (textScale - 1.0) * 36.0).clamp(78.0, 120.0);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Card(
+        elevation: 0,
+        color: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            color: cs.surface.withAlpha(238),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cs.outlineVariant.withAlpha(110)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _isKo ? '요구수익률' : 'Required return',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: inputWidth,
+                      child: TextField(
+                        controller: ctrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        textAlign: TextAlign.center,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'^\d*\.?\d{0,1}$'),
+                          ),
+                        ],
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 6,
+                          ),
+                          suffixText: '%',
+                          hintText: isKr ? '15.0' : '10.0',
+                          filled: true,
+                          fillColor: Colors.white.withAlpha(190),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(9),
+                            borderSide: BorderSide(
+                              color: cs.outlineVariant.withAlpha(120),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(9),
+                            borderSide: BorderSide(
+                              color: accent.withAlpha(110),
+                              width: 1.0,
+                            ),
+                          ),
+                        ),
+                        onSubmitted: (v) {
+                          _applyRankingRPctFromText(v, isKr: isKr);
+                        },
+                        onEditingComplete: () {
+                          _applyRankingRPctFromText(ctrl.text, isKr: isKr);
+                          FocusScope.of(context).unfocus();
+                        },
+                        onTapOutside: (_) {
+                          _applyRankingRPctFromText(ctrl.text, isKr: isKr);
+                          FocusScope.of(context).unfocus();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _isKo
+                      ? '이 값에 따라 기대수익률과 적정주가가 다시 계산됩니다.'
+                      : 'Expected return and fair price are recalculated with this value.',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: accent.withAlpha(185),
+                    inactiveTrackColor: cs.outlineVariant.withAlpha(85),
+                    thumbColor: accent.withAlpha(205),
+                    overlayColor: accent.withAlpha(14),
+                    trackHeight: 2.4,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 7,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 12,
+                    ),
+                  ),
+                  child: Slider(
+                    value: r,
+                    min: 5,
+                    max: 20,
+                    divisions: 150,
+                    label: "${r.toStringAsFixed(1)}%",
+                    onChanged: (v) => _setRankingRPct(v, isKr: isKr),
+                    onChangeEnd: (v) => _setRankingRPct(v, isKr: isKr),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 2, right: 2, top: 0),
+                  child: Row(
+                    children: [
+                      Text(
+                        "5%",
+                        style: TextStyle(fontSize: 9.5, color: Colors.grey[600]),
+                      ),
+                      const Spacer(),
+                      Text(
+                        "20%",
+                        style: TextStyle(fontSize: 9.5, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 오른쪽 금액 위젯
+  Widget _priceTag({
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: '$label ',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: color.withAlpha(220),
+                ),
+              ),
+              TextSpan(
+                text: value,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

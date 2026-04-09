@@ -385,16 +385,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get favorite => 'Favorite';
 
   @override
-  String get showAdvancedView => 'Show advanced view';
-
-  @override
-  String get hideAdvancedView => 'Hide advanced view';
-
-  @override
-  String get openNaverKr => 'Open Naver Securities';
-
-  @override
-  String get openNaverGlobal => 'Open Naver Global Search';
+  String get openNaverKr => 'Naver';
 
   @override
   String get retry => 'Retry';

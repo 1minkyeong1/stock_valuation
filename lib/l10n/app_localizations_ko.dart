@@ -372,16 +372,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get favorite => '즐겨찾기';
 
   @override
-  String get showAdvancedView => '고급보기 보기';
-
-  @override
-  String get hideAdvancedView => '고급보기 숨기기';
-
-  @override
-  String get openNaverKr => 'N증권 열기';
-
-  @override
-  String get openNaverGlobal => 'N해외검색 열기';
+  String get openNaverKr => 'N증권';
 
   @override
   String get retry => '다시 시도';

@@ -72,4 +72,13 @@ class UsStubRepository implements StockRepository {
       marketCap: 0,
     );
   }
+
+  // 피보나치 그래프
+  @override
+  Future<PriceFibChartData> getPriceFibChart(
+    String code, {
+    int months = 36,
+  }) async {
+    throw UnimplementedError('Stub getPriceFibChart not implemented yet');
+  }
 }

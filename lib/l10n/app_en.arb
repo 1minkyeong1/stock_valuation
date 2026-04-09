@@ -215,10 +215,7 @@
   },
 
   "favorite": "Favorite",
-  "showAdvancedView": "Show advanced view",
-  "hideAdvancedView": "Hide advanced view",
-  "openNaverKr": "Open Naver Securities",
-  "openNaverGlobal": "Open Naver Global Search",
+  "openNaverKr": "Naver",
   "retry": "Retry",
   "loadingPriceStart": "Loading price",
   "loadingPriceTimeout": "Price request timed out (8s)",

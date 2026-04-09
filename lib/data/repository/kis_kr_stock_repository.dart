@@ -90,44 +90,44 @@ class KisKrStockRepository implements StockRepository {
   }
 
   double? _toNullableDouble(dynamic v) {
-  if (v == null) return null;
-  if (v is num) return v.toDouble();
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
 
-  final s = v.toString().trim();
-  if (s.isEmpty) return null;
+    final s = v.toString().trim();
+    if (s.isEmpty) return null;
 
-  return double.tryParse(s);
-}
+    return double.tryParse(s);
+  }
 
-List<YearMetric> _parseYearMetrics(dynamic raw) {
-  if (raw is! List) return const [];
+  List<YearMetric> _parseYearMetrics(dynamic raw) {
+    if (raw is! List) return const [];
 
-  return raw
-      .map((e) {
-        if (e is! Map) return null;
+    return raw
+        .map((e) {
+          if (e is! Map) return null;
 
-        final m = e.cast<String, dynamic>();
-        final y = m['year'];
-        final v = m['value'];
+          final m = e.cast<String, dynamic>();
+          final y = m['year'];
+          final v = m['value'];
 
-        final year = y is num ? y.toInt() : int.tryParse('$y');
-        final value = v is num ? v.toDouble() : double.tryParse('$v');
+          final year = y is num ? y.toInt() : int.tryParse('$y');
+          final value = v is num ? v.toDouble() : double.tryParse('$v');
 
-        if (year == null || value == null) return null;
-        return YearMetric(year: year, value: value);
-      })
-      .whereType<YearMetric>()
-      .toList();
-}
+          if (year == null || value == null) return null;
+          return YearMetric(year: year, value: value);
+        })
+        .whereType<YearMetric>()
+        .toList();
+  }
 
-List<int> _parseIntList(dynamic raw) {
-  if (raw is! List) return const [];
+  List<int> _parseIntList(dynamic raw) {
+    if (raw is! List) return const [];
 
-  return raw
-      .map((e) => e is num ? e.toInt() : int.tryParse('$e'))
-      .whereType<int>()
-      .toList();
-}
+    return raw
+        .map((e) => e is num ? e.toInt() : int.tryParse('$e'))
+        .whereType<int>()
+        .toList();
+  }
 
   // =========================
   // 1) 검색 (Worker: /kr/search)
@@ -411,6 +411,51 @@ List<int> _parseIntList(dynamic raw) {
       default:
         return '';
     }
+  }
+
+  // 피보나치 그래프
+  @override
+  Future<PriceFibChartData> getPriceFibChart(
+    String code, {
+    int months = 36,
+  }) async {
+    final code6 = code.trim();
+    if (code6.isEmpty) {
+      throw Exception('Empty KR code');
+    }
+
+    final base = workerBaseUrl.endsWith('/')
+        ? workerBaseUrl.substring(0, workerBaseUrl.length - 1)
+        : workerBaseUrl;
+
+    final uri = Uri.parse('$base/kr/price-fib').replace(
+      queryParameters: {
+        'code': code6,
+        'months': '$months',
+      },
+    );
+
+    if (debugLog) {
+      debugPrint('[KIS-KR] GET $uri');
+    }
+
+    final res = await _client.get(uri).timeout(const Duration(seconds: 12));
+
+    if (res.statusCode != 200) {
+      throw Exception('KR price fib HTTP ${res.statusCode}: ${res.body}');
+    }
+
+    final body = jsonDecode(utf8.decode(res.bodyBytes));
+
+    if (body is! Map<String, dynamic>) {
+      throw Exception('KR price fib bad response type');
+    }
+
+    if (body['ok'] != true) {
+      throw Exception('KR price fib failed: ${(body['error'] ?? 'unknown').toString()}');
+    }
+
+    return PriceFibChartData.fromJson(body);
   }
 }
  

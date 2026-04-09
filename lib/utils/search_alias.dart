@@ -55,12 +55,117 @@ class SearchAlias {
     return _usTickerToPrimaryKo[code];
   }
 
- 
+  // 영어명 국내 검색 함수
+  static String _normEn(String s) => s
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), '')
+      .replaceAll(RegExp(r'[()\-_.,·&]'), '');
+
+  static final Map<String, Map<String, List<String>>> _krEnglishGroups = () {
+    final out = <String, Map<String, List<String>>>{};
+
+    for (final e in krCodeToEnglishName.entries) {
+      final code = e.key.trim();
+      final en = e.value.trim();
+      if (code.isEmpty || en.isEmpty) continue;
+
+      final nk = _normEn(en);
+      if (nk.isEmpty) continue;
+
+      final codeMap = out[nk] ??= <String, List<String>>{};
+      final names = codeMap[code] ??= <String>[];
+      if (!names.contains(en)) names.add(en);
+    }
+
+    return out;
+  }();
+
+  static final List<String> _krEnglishKeys = _krEnglishGroups.keys.toList();
+
+  static List<AliasGroup> resolveKrGroups(String query, {int limit = 20}) {
+    final raw = query.trim();
+    final q = norm(raw);
+    final qEn = _normEn(raw);
+    if (raw.isEmpty) return const [];
+
+    final result = <String, List<String>>{};
+
+    void mergeCodeMap(Map<String, List<String>>? codeMap) {
+      if (codeMap == null) return;
+      for (final e in codeMap.entries) {
+        if (result.length >= limit) return;
+        final code = e.key;
+        final names = result[code] ??= <String>[];
+        for (final n in e.value) {
+          if (!names.contains(n)) names.add(n);
+        }
+      }
+    }
+
+    // 1) 기존 한글 exact / partial
+    mergeCodeMap(_krExactGroups[q]);
+
+    if (hasHangul(raw) && q.length >= _minPartialLen && result.length < limit) {
+      final matches = <_ScoredKey>[];
+      for (final k in _krKeys) {
+        final score = _matchScore(k, q);
+        if (score == null) continue;
+        matches.add(_ScoredKey(k, score));
+      }
+
+      matches.sort((a, b) {
+        final s = a.score.compareTo(b.score);
+        if (s != 0) return s;
+        final la = a.key.length;
+        final lb = b.key.length;
+        if (la != lb) return la.compareTo(lb);
+        return a.key.compareTo(b.key);
+      });
+
+      for (final mk in matches) {
+        if (result.length >= limit) break;
+        mergeCodeMap(_krExactGroups[mk.key]);
+      }
+    }
+
+    // 2) 영어 exact / partial 추가
+    if (qEn.isNotEmpty && result.length < limit) {
+      mergeCodeMap(_krEnglishGroups[qEn]);
+
+      if (qEn.length >= 2 && result.length < limit) {
+        final matches = <_ScoredKey>[];
+        for (final k in _krEnglishKeys) {
+          final score = _matchScore(k, qEn);
+          if (score == null) continue;
+          matches.add(_ScoredKey(k, score));
+        }
+
+        matches.sort((a, b) {
+          final s = a.score.compareTo(b.score);
+          if (s != 0) return s;
+          final la = a.key.length;
+          final lb = b.key.length;
+          if (la != lb) return la.compareTo(lb);
+          return a.key.compareTo(b.key);
+        });
+
+        for (final mk in matches) {
+          if (result.length >= limit) break;
+          mergeCodeMap(_krEnglishGroups[mk.key]);
+        }
+      }
+    }
+
+    return result.entries
+        .map((e) => AliasGroup(code: e.key, names: e.value))
+        .toList();
+  }
+
 
   // -------------------------
   // 🇺🇸 US (한글/별칭 → 티커)
   // -------------------------
-  // ✅ 기존 매핑 그대로 유지 (절대 줄이지 않음)
   static const Map<String, String> usKoToTicker = {
     '애플': 'AAPL',
     '마이크로소프트': 'MSFT',
@@ -692,7 +797,10 @@ class SearchAlias {
     '메틀러톨레도': 'MTD',
     '퍼블릭스토리지': 'PSA',
     '인터랙티브브로커스': 'IBKR',
-    
+    '카디널헬스': 'CAH',
+    '힐튼월드와이드': 'HLT',
+    '롤린스': 'ROL',
+    '씨게이트': 'STX',
 
   };
 
@@ -826,56 +934,6 @@ class SearchAlias {
 
   static final List<String> _krKeys = _krExactGroups.keys.toList();
   static const int _minPartialLen = 2;
-
-  static List<AliasGroup> resolveKrGroups(String query, {int limit = 20}) {
-    final raw = query.trim();
-    final q = norm(raw);
-    if (q.isEmpty) return const [];
-
-    final result = <String, List<String>>{};
-    void mergeCodeMap(Map<String, List<String>>? codeMap) {
-      if (codeMap == null) return;
-      for (final e in codeMap.entries) {
-        if (result.length >= limit) return;
-        final code = e.key;
-        final names = result[code] ??= <String>[];
-        for (final n in e.value) {
-          if (!names.contains(n)) names.add(n);
-        }
-      }
-    }
-
-    // exact
-    mergeCodeMap(_krExactGroups[q]);
-
-    // partial
-    if (hasHangul(raw) && q.length >= _minPartialLen && result.length < limit) {
-      final matches = <_ScoredKey>[];
-      for (final k in _krKeys) {
-        final score = _matchScore(k, q);
-        if (score == null) continue;
-        matches.add(_ScoredKey(k, score));
-      }
-
-      matches.sort((a, b) {
-        final s = a.score.compareTo(b.score);
-        if (s != 0) return s;
-        final la = a.key.length;
-        final lb = b.key.length;
-        if (la != lb) return la.compareTo(lb);
-        return a.key.compareTo(b.key);
-      });
-
-      for (final mk in matches) {
-        if (result.length >= limit) break;
-        mergeCodeMap(_krExactGroups[mk.key]);
-      }
-    }
-
-    return result.entries
-        .map((e) => AliasGroup(code: e.key, names: e.value))
-        .toList();
-  }
 
   static AliasHit? resolveKr(String query) {
     final groups = resolveKrGroups(query, limit: 1);

@@ -19,7 +19,6 @@ import 'package:stock_valuation_app/services/valuation_service.dart';
 import 'package:stock_valuation_app/widgets/ad_banner.dart';
 import 'package:stock_valuation_app/utils/number_format.dart';
 
-import 'package:stock_valuation_app/widgets/sell_guide_sheet.dart';
 import 'package:stock_valuation_app/widgets/inputs/labeled_number_field.dart';
 import 'package:stock_valuation_app/widgets/inputs/metric_field_with_badge.dart';
 import 'package:stock_valuation_app/services/external_link_service.dart';
@@ -31,6 +30,9 @@ import 'package:stock_valuation_app/services/result_pdf_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stock_valuation_app/l10n/app_localizations.dart';
 import 'package:stock_valuation_app/copy/result_copy.dart';
+import 'package:stock_valuation_app/widgets/result/price_fib_chart_card.dart';
+import 'package:stock_valuation_app/widgets/result/result_explanation_card.dart';
+import 'package:stock_valuation_app/widgets/common/mini_help_tip.dart';
 
 class ResultPage extends StatefulWidget {
   final RepoHub hub;
@@ -66,7 +68,14 @@ class ResultPage extends StatefulWidget {
 
 class _ResultPageState extends State<ResultPage> {
 
+  // 피보나치 모델과 차트 변수
   StockFundamentals? _fundamentals;
+  PriceFibChartData? _priceFibChart;
+  
+  // 피보나치 바텀시트로 보여주기
+  int _priceFibMonths = 36;
+  bool _priceFibLoading = false;
+
 
   AppLocalizations get t => AppLocalizations.of(context)!;
   bool get isKoLang => ResultCopy.isKo(context);
@@ -93,6 +102,7 @@ class _ResultPageState extends State<ResultPage> {
   late final TextEditingController _epsCtrl;
   late final TextEditingController _bpsCtrl;
   late final TextEditingController _dpsCtrl;
+  late final TextEditingController _rPctCtrl;
 
   // r(%) 슬라이더
   double rPct = 5.0; // 9.0 -> 5.0
@@ -105,6 +115,8 @@ class _ResultPageState extends State<ResultPage> {
   // 헤더카드, 평가문구 토글용
   bool _showAdvanced = true;
   bool _headerExpanded = true;
+  bool _explanationExpanded = false;
+
   static const _kResultViewMode = 'result_view_mode_v1';
   static const _kHeaderExpanded = 'result_header_expanded_v1';
 
@@ -120,7 +132,11 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   // 결과/요약 표시용 포맷 (콤마/단위 일관성)
-  String _fmtMoney(num v) => _isUS ? fmtUsd(v) : fmtWon(v);
+  String _fmtMoney(num v) {
+    return _isUS
+        ? fmtUsdDecimal(v, fractionDigits: 2)
+        : fmtWonDecimal(v, fractionDigits: 0);
+  }
 
   // 가격 포맷터
   late final TextInputFormatter _priceFormatterKr;
@@ -323,6 +339,7 @@ class _ResultPageState extends State<ResultPage> {
     _epsCtrl = TextEditingController();
     _bpsCtrl = TextEditingController();
     _dpsCtrl = TextEditingController();
+    _rPctCtrl = TextEditingController(text: rPct.toStringAsFixed(1));
 
     _priceFormatterKr = MoneyInputFormatter(allowDecimal: false);
     _priceFormatterUs = MoneyInputFormatter(
@@ -350,6 +367,7 @@ class _ResultPageState extends State<ResultPage> {
     _epsCtrl.dispose();
     _bpsCtrl.dispose();
     _dpsCtrl.dispose();
+    _rPctCtrl.dispose();
     super.dispose();
   }
 
@@ -417,6 +435,33 @@ class _ResultPageState extends State<ResultPage> {
     return double.tryParse(t) ?? 0.0;
   }
 
+  void _setRPct(double value, {bool updateText = true}) {
+    final next = value.clamp(5.0, 20.0).toDouble();
+
+    setState(() {
+      rPct = next;
+      if (updateText) {
+        _rPctCtrl.text = next.toStringAsFixed(1);
+      }
+    });
+
+    _scheduleSaveInputs();
+  }
+
+  void _applyRPctFromText(String raw, {bool updateText = true}) {
+    final cleaned = raw.trim().replaceAll(',', '');
+    final v = double.tryParse(cleaned);
+
+    if (v == null) {
+      if (updateText) {
+        _rPctCtrl.text = rPct.toStringAsFixed(1);
+      }
+      return;
+    }
+
+    _setRPct(v, updateText: updateText);
+  }
+
   void _applyToTextFields({required double price, required StockFundamentals f}) {
     final fd = _isUS ? 2 : 0;
 
@@ -461,6 +506,7 @@ class _ResultPageState extends State<ResultPage> {
     if (!mounted) return;
     setState(() {
       rPct = _initR;
+      _rPctCtrl.text = _initR.toStringAsFixed(1);
       _applyToTextFields(price: _initPrice, f: _initF);
     });
   }
@@ -492,6 +538,8 @@ class _ResultPageState extends State<ResultPage> {
     StockFundamentals f = const StockFundamentals(eps: 0, bps: 0, dps: 0);
 
     String? nextPriceBasDt;
+
+    PriceFibChartData? nextPriceFibChart;
 
     try {
       // 1) 가격
@@ -528,8 +576,26 @@ class _ResultPageState extends State<ResultPage> {
         }
       }
 
+      // 피보나치 지표
+      Future<void> loadPriceFibChart() async {
+        try {
+          nextPriceFibChart = await widget.hub
+              .getPriceFibChart(widget.market, code, months: _priceFibMonths)
+              .timeout(const Duration(seconds: 12), onTimeout: () {
+            throw Exception('price fib chart timeout');
+          });
+        } catch (e, st) {
+          debugPrint('[ResultPage] price fib chart fail: $e\n$st');
+          nextPriceFibChart = null;
+        }
+      }
+
       // 병렬
-      await Future.wait([loadPrice(), loadFunda()]);
+      await Future.wait([
+        loadPrice(),
+        loadFunda(),
+        loadPriceFibChart(),
+      ]);
 
       // 3) 초기값 반영
       _setStage(t.loadingApplyInitial);
@@ -575,6 +641,7 @@ class _ResultPageState extends State<ResultPage> {
           : initialRPct;
 
       rPct = _initR;
+      _rPctCtrl.text = rPct.toStringAsFixed(1);
 
       _applyToTextFields(price: price, f: f);
 
@@ -608,9 +675,10 @@ class _ResultPageState extends State<ResultPage> {
                 : fmtWonDecimal(saved.dps, fractionDigits: fd);
           }
 
-          // ✅ SearchPage에서 넘어온 값이 없을 때만 저장값 복원
+          // 요구수익률의 입력창 숫자와 실제 rPct 값이 항상 같이 맞춰짐
           if (widget.initialRequiredReturnPct == null) {
             rPct = saved.rPct;
+            _rPctCtrl.text = rPct.toStringAsFixed(1);
           }
         }
         
@@ -625,6 +693,7 @@ class _ResultPageState extends State<ResultPage> {
       setState(() {
         _priceBasDt = nextPriceBasDt;
         _fundamentals = f;
+        _priceFibChart = nextPriceFibChart;
         _loading = false;
       });
     } catch (e, st) {
@@ -634,6 +703,47 @@ class _ResultPageState extends State<ResultPage> {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  // 피보나치 차트 불러오는 함수
+  Future<void> _reloadPriceFibChartOnly(int months) async {
+    if (!mounted) return;
+
+    setState(() {
+      _priceFibLoading = true;
+    });
+
+    try {
+      final chart = await widget.hub
+          .getPriceFibChart(widget.market, widget.item.code, months: months)
+          .timeout(const Duration(seconds: 12), onTimeout: () {
+        throw Exception('price fib chart timeout');
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _priceFibMonths = months;
+        _priceFibChart = chart;
+        _priceFibLoading = false;
+      });
+    } catch (e, st) {
+      debugPrint('[ResultPage] reload price fib chart fail: $e\n$st');
+      if (!mounted) return;
+
+      setState(() {
+        _priceFibLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isKoLang
+                ? '피보나치 차트를 다시 불러오지 못했습니다.'
+                : 'Failed to reload Fibonacci chart.',
+          ),
+        ),
+      );
     }
   }
 
@@ -681,17 +791,6 @@ class _ResultPageState extends State<ResultPage> {
 
     return null;
   }
-
-  // Widget _metricHint(String? s) {
-  //   if (s == null || s.trim().isEmpty) return const SizedBox.shrink();
-  //   return Padding(
-  //     padding: const EdgeInsets.only(top: 6),
-  //     child: Text(
-  //       s,
-  //       style: const TextStyle(fontSize: 11, color: Colors.grey),
-  //     ),
-  //   );
-  // }
 
   // ---------- Rating UI ----------
   IconData _ratingIcon(RatingLevel level) {
@@ -770,7 +869,7 @@ class _ResultPageState extends State<ResultPage> {
           ),
 
           Tooltip(
-            message: 'N증권',
+            message: t.openNaverKr,
             child: TextButton(
               onPressed: _openNaverFinanceForCurrent,
               style: TextButton.styleFrom(
@@ -780,8 +879,8 @@ class _ResultPageState extends State<ResultPage> {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
               ),
-              child: const Text(
-                'N증권',
+              child: Text(
+                t.openNaverKr,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -816,22 +915,22 @@ class _ResultPageState extends State<ResultPage> {
           ),
         ],
       ),
-      bottomNavigationBar: const SafeArea(
+      bottomNavigationBar: const AdBanner(),
+      body: SafeArea(
         top: false,
-        child: AdBanner(),
+        child: _loading
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 12),
+                    Text(_stage.isEmpty ? t.loading : _stage),
+                  ],
+                ),
+              )
+            : (_error != null ? _errorView() : _bodyView()),
       ),
-      body: _loading
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 12),
-                  Text(_stage.isEmpty ? t.loading : _stage),
-                ],
-              ),
-            )
-          : (_error != null ? _errorView() : _bodyView()),
     );
   }
 
@@ -893,19 +992,34 @@ class _ResultPageState extends State<ResultPage> {
       );
     }
 
-    return SafeArea(
-      minimum: const EdgeInsets.all(12),
-      child: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          _headerCard(name, code),
-          const SizedBox(height: 6),
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        _headerCard(name, code),
+        const SizedBox(height: 8),
+
+          if (_priceFibChart != null) ...[
+            PriceFibChartCard(
+              data: _priceFibChart!,
+              isKoLang: isKoLang,
+              isUS: _isUS,
+              months: _priceFibMonths,
+              loading: _priceFibLoading,
+              formatMoney: (v) => _fmtMoney(v),
+              onTapGuide: () => _showFibGuideSheet(_priceFibChart!),
+              onSelectMonths: _reloadPriceFibChartOnly,
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          _requiredReturnHeaderCard(),
+          const SizedBox(height: 8),
 
           if (calcError == null && result != null) ...[
             _topQuickSummaryCard(
-              currentPrice: price,
               r: result,
               rating: rating,
+              fib: _priceFibChart,
             ),
             const SizedBox(height: 8),
 
@@ -917,7 +1031,11 @@ class _ResultPageState extends State<ResultPage> {
 
             Text(
               ResultCopy.valuationStatusText(context, result.gapPct),
-              style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              style: TextStyle(
+                color: Colors.grey[700],
+                fontSize: 10.5,
+                height: 1.2,
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -942,10 +1060,239 @@ class _ResultPageState extends State<ResultPage> {
           const SizedBox(height: 8),
           _resultCard(currentPrice: price, result: result, calcError: calcError),
           const SizedBox(height: 8),
-          _sellGuideCard(result: result, calcError: calcError),
+          if (calcError == null && result != null) ...[
+            _explanationSection(
+              price: price,
+              result: result,
+              rating: rating,
+            ),
+            const SizedBox(height: 8),
+          ],
           const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  // 기업설명 결과
+  String _explanationHeadline(ValuationResult result, ValuationRating? rating) {
+    final expected = result.expectedReturnPct;
+    final expectedText =
+        '${expected >= 0 ? '+' : ''}${expected.toStringAsFixed(1)}%';
+    final gapText = result.gapPct.toStringAsFixed(1);
+
+    if (isKoLang) {
+      switch (rating?.level) {
+        case RatingLevel.strongBuy:
+          return '계산된 가치 대비 상당히 저평가된 상태입니다. $expectedText 수준의 높은 기대수익률을 목표로 공격적인 검토가 가능한 구간입니다.';
+        case RatingLevel.buy:
+          return '현재 주가는 적정가보다 낮게 형성되어 있습니다. expectedText 정도의 상승 여력이 있어, 긍정적인 관점으로 지켜볼 만한 시점입니다.';
+        case RatingLevel.caution:
+          return '주가는 싸 보일 수 있지만 수익성 지표가 다소 불안정합니다. 가격만 보고 진입하기보다 실적 회복 여부를 먼저 확인하는 것이 안전합니다.';
+        case RatingLevel.avoid:
+          return '가치 대비 가격 부담이 크거나 수익성이 약해진 상태입니다. 지금은 적극적인 매수보다 보수적인 관점에서 흐름을 관망하는 것이 현명합니다.';
+        case RatingLevel.neutral:
+        default:
+          return '현재 주가는 적정가($gapText%) 부근에서 균형을 이루고 있습니다. 큰 왜곡이 없는 상태이므로, 향후 실적 변화에 따라 방향성을 결정할 것으로 보입니다.';
+      }
+    }
+
+    switch (rating?.level) {
+      case RatingLevel.strongBuy:
+        return 'Highly undervalued with a strong expected return of $expectedText This is a prime range for aggressive consideration.';
+      case RatingLevel.buy:
+        return 'Trading below its fair value with an upside of $expectedText It presents a solid opportunity for a positive outlook.';
+      case RatingLevel.caution:
+        return 'Price may seem cheap, but profitability shows weakness Confirming an earnings recovery is safer than buying on price alone.';
+      case RatingLevel.avoid:
+        return 'The stock is overvalued or profitability is declining A conservative approach is recommended over aggressive entry right now.';
+      case RatingLevel.neutral:
+      default:
+        return 'Price is balanced near its fair value ($gapText%). With no significant gap, the next move will likely depend on future earnings.';
+    }
+  }
+
+  Widget _explanationMiniChip({
+    required String label,
+    required String value,
+    Color? valueColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(190),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _cInfo.withAlpha(45)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label ',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey[700],
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: valueColor ?? Colors.black,
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _collapsedExplanationCard({
+    required ValuationResult result,
+    required ValuationRating? rating,
+  }) {
+    final expectedText =
+        '${result.expectedReturnPct >= 0 ? '+' : ''}${result.expectedReturnPct.toStringAsFixed(1)}%';
+
+    final fibText = _priceFibChart == null
+        ? null
+        : '${_priceFibChart!.positionPct.toStringAsFixed(1)}%';
+
+    return Card(
+      elevation: 0,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: _cInfo.withAlpha(60)),
+      ),
+      child: InkWell(
+        onTap: () {
+          setState(() => _explanationExpanded = true);
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: _cInfo.withAlpha(10),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: _cInfo.withAlpha(25),
+                      child: Icon(
+                        Icons.lightbulb_outline,
+                        color: _cInfo.withAlpha(220),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        isKoLang
+                            ? '이 기업은 지금 이런 상태예요'
+                            : 'What this stock looks like now',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Icon(Icons.expand_more, color: Colors.grey[700]),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _explanationHeadline(result, rating),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _explanationMiniChip(
+                      label: isKoLang ? '기대수익률' : 'Expected',
+                      value: expectedText,
+                      valueColor: result.expectedReturnPct >= 0
+                          ? Colors.green
+                          : Colors.red,
+                    ),
+                    _explanationMiniChip(
+                      label: isKoLang ? '적정주가' : 'Fair price',
+                      value: _fmtMoney(result.fairPrice),
+                    ),
+                    if (fibText != null)
+                      _explanationMiniChip(
+                        label: isKoLang ? '피보나치 위치' : 'Fib position',
+                        value: fibText,
+                        valueColor: _accent.withAlpha(220),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  isKoLang ? '눌러서 자세히 보기' : 'Tap to expand',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _explanationSection({
+    required double price,
+    required ValuationResult result,
+    required ValuationRating? rating,
+  }) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: _explanationExpanded
+          ? Column(
+              key: const ValueKey('expanded_explanation'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ResultExplanationCard(
+                  isKoLang: isKoLang,
+                  currentPrice: price,
+                  requiredReturnPct: rPct,
+                  fibPositionPct: _priceFibChart?.positionPct,
+                  formatMoney: _fmtMoney,
+                  result: result,
+                  rating: rating,
+                  accentColor: _accent,
+                  infoColor: _cInfo,
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () {
+                      setState(() => _explanationExpanded = false);
+                    },
+                    icon: const Icon(Icons.expand_less),
+                    label: Text(isKoLang ? '간단히 보기' : 'Show less'),
+                  ),
+                ),
+              ],
+            )
+          : _collapsedExplanationCard(
+              result: result,
+              rating: rating,
+            ),
     );
   }
 
@@ -1096,6 +1443,161 @@ class _ResultPageState extends State<ResultPage> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 요구수익률 카드함수
+  Widget _requiredReturnHeaderCard() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    final textScale = MediaQuery.textScalerOf(context)
+        .scale(1.0)
+        .clamp(1.0, 2.0)
+        .toDouble();
+
+    final inputWidth = (76.0 + (textScale - 1.0) * 28.0).clamp(76.0, 110.0);
+
+    return Card(
+      elevation: 0,
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surface.withAlpha(235),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withAlpha(85)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            ResultCopy.requiredReturnLabel(context),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        MiniHelpTip(
+                          message: ResultCopy.requiredReturnTooltip(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: inputWidth,
+                    child: TextField(
+                      controller: _rPctCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.center,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d*\.?\d{0,1}$'),
+                        ),
+                      ],
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
+                        suffixText: '%',
+                        hintText: '10.0',
+                        filled: true,
+                        fillColor: Colors.white.withAlpha(190),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                          borderSide: BorderSide(
+                            color: cs.outlineVariant.withAlpha(110),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(9),
+                          borderSide: BorderSide(
+                            color: _accent.withAlpha(120),
+                            width: 1.0,
+                          ),
+                        ),
+                      ),
+                      onSubmitted: (v) => _applyRPctFromText(v),
+                      onEditingComplete: () {
+                        _applyRPctFromText(_rPctCtrl.text);
+                        FocusScope.of(context).unfocus();
+                      },
+                      onTapOutside: (_) {
+                        _applyRPctFromText(_rPctCtrl.text);
+                        FocusScope.of(context).unfocus();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                ResultCopy.requiredReturnHelp(context),
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 2),
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: _accent.withAlpha(190),
+                  inactiveTrackColor: _accent.withAlpha(50),
+                  thumbColor: _accent.withAlpha(215),
+                  overlayColor: _accent.withAlpha(18),
+                  valueIndicatorColor: _accent.withAlpha(215),
+                  trackHeight: 2.0,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 10,
+                  ),
+                ),
+                child: Slider(
+                  value: rPct,
+                  min: 5,
+                  max: 20,
+                  divisions: 150,
+                  label: "${rPct.toStringAsFixed(1)}%",
+                  onChanged: (v) => _setRPct(v),
+                ),
+              ),
+              Row(
+                children: [
+                  Text(
+                    "5%",
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  ),
+                  const Spacer(),
+                  Text(
+                    "20%",
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -1310,6 +1812,7 @@ class _ResultPageState extends State<ResultPage> {
                 key: const ValueKey('eps_field'),
                 isUS: _isUS,
                 label: "EPS",
+                helpMessage: ResultCopy.epsTooltip(context),
                 controller: _epsCtrl,
                 onChanged: (_) => _onAnyInputChanged(),
               ),
@@ -1320,6 +1823,7 @@ class _ResultPageState extends State<ResultPage> {
                 key: const ValueKey('bps_field'),
                 isUS: _isUS,
                 label: "BPS",
+                helpMessage: ResultCopy.bpsTooltip(context),
                 controller: _bpsCtrl,
                 onChanged: (_) => _onAnyInputChanged(),
               ),
@@ -1330,6 +1834,7 @@ class _ResultPageState extends State<ResultPage> {
                 key: const ValueKey('dps_field'),
                 isUS: _isUS,
                 label: "DPS",
+                helpMessage: ResultCopy.dpsTooltip(context),
                 controller: _dpsCtrl,
                 onChanged: (_) => _onAnyInputChanged(),
               ),
@@ -1342,92 +1847,6 @@ class _ResultPageState extends State<ResultPage> {
                     fontSize: 11,
                     color: Colors.grey[500],
                   ),
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                decoration: BoxDecoration(
-                  color: _accent.withAlpha(8),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _accent.withAlpha(28)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            ResultCopy.requiredReturnLabel(context),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withAlpha(170),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: _accent.withAlpha(30)),
-                          ),
-                          child: Text(
-                            "r = ${rPct.toStringAsFixed(1)}%",
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: _accent.withAlpha(220),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      ResultCopy.requiredReturnHelp(context),
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: _accent.withAlpha(200),
-                        inactiveTrackColor: _accent.withAlpha(55),
-                        thumbColor: _accent.withAlpha(220),
-                        overlayColor: _accent.withAlpha(28),
-                        valueIndicatorColor: _accent.withAlpha(220),
-                      ),
-                      child: Slider(
-                        value: rPct,
-                        min: 5,
-                        max: 20,
-                        divisions: 150,
-                        label: "${rPct.toStringAsFixed(1)}%",
-                        onChanged: (v) {
-                          setState(() => rPct = v);
-                          _scheduleSaveInputs();
-                        },
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        Text(
-                          "5%",
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                        ),
-                        const Spacer(),
-                        Text(
-                          "20%",
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                        ),
-                      ],
-                    ),
-                  ],
                 ),
               ),
             ],
@@ -1561,12 +1980,15 @@ class _ResultPageState extends State<ResultPage> {
 
   // 상단 요약카드
   Widget _topQuickSummaryCard({
-    required double currentPrice,
     required ValuationResult r,
     required ValuationRating? rating,
+    PriceFibChartData? fib,
   }) {
     final judgmentColor =
         rating?.accent ?? _ratingColor(rating?.level ?? RatingLevel.neutral);
+
+    final fibText = fib == null ? '-' : '${fib.positionPct.toStringAsFixed(1)}%';
+    final fibSub = _fibZoneShort(fib);
 
     return Card(
       elevation: 0,
@@ -1587,9 +2009,12 @@ class _ResultPageState extends State<ResultPage> {
                   children: [
                     Expanded(
                       child: _topSummaryMetricBox(
-                        title: isKoLang ? '현재가' : 'Current price',
-                        value: _fmtMoney(currentPrice),
-                        subtitle: _isUS ? r'Now ($)' : 'Now (KRW)',
+                        title: isKoLang
+                            ? '${(_priceFibMonths / 12).round()}년 위치'
+                            : '${(_priceFibMonths / 12).round()}Y position',
+                        value: fibText,
+                        subtitle: fibSub,
+                        valueColor: _accent.withAlpha(220),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -1637,6 +2062,18 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 피보나치 헬퍼
+  String _fibZoneShort(PriceFibChartData? fib) {
+    if (fib == null) return isKoLang ? '차트 없음' : 'No chart';
+
+    final p = fib.positionPct;
+    if (p >= 80) return isKoLang ? '상단 20%' : 'Top 20%';
+    if (p >= 60) return isKoLang ? '상단 구간' : 'Upper zone';
+    if (p >= 40) return isKoLang ? '중간 구간' : 'Middle zone';
+    if (p >= 20) return isKoLang ? '하단 구간' : 'Lower zone';
+    return isKoLang ? '하단 20%' : 'Bottom 20%';
+  }
+
   Widget _topSummaryMetricBox({
     required String title,
     required String value,
@@ -1646,8 +2083,8 @@ class _ResultPageState extends State<ResultPage> {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: _cKpi.withAlpha(10),
-        border: Border.all(color: _cKpi.withAlpha(45)),
+        color: Colors.white.withAlpha(185),
+        border: Border.all(color: _cKpi.withAlpha(35)),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -1658,8 +2095,9 @@ class _ResultPageState extends State<ResultPage> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: Colors.grey[700],
+              color: Colors.grey[800],
               fontSize: 11,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 6),
@@ -1755,12 +2193,14 @@ class _ResultPageState extends State<ResultPage> {
                 label: "ROE",
                 value: "${r.roePct.toStringAsFixed(2)}%",
                 helper: "EPS / BPS",
+                helpMessage: ResultCopy.roeTooltip(context),
                 icon: Icons.flash_on,
               ),
               _metricTile(
                 label: "ROE / r",
                 value: r.roeOverR.toStringAsFixed(2),
                 helper: ResultCopy.roeOverRHelper(context),
+                helpMessage: ResultCopy.roeOverRTooltip(context),
                 icon: Icons.functions,
               ),
             ]),
@@ -1770,6 +2210,7 @@ class _ResultPageState extends State<ResultPage> {
                 label: ResultCopy.dividendYieldLabel(context),
                 value: "${r.dividendYieldPct.toStringAsFixed(2)}%",
                 helper: isKoLang ? "DPS / 현재가" : "DPS / current price",
+                helpMessage: ResultCopy.dividendYieldTooltip(context),
                 icon: Icons.savings,
               ),
             ]),
@@ -1778,11 +2219,13 @@ class _ResultPageState extends State<ResultPage> {
               _metricTile(
                 label: "PER",
                 value: r.per.toStringAsFixed(2),
+                helpMessage: ResultCopy.perTooltip(context),
                 icon: Icons.calculate,
               ),
               _metricTile(
                 label: "PBR",
                 value: r.pbr.toStringAsFixed(2),
+                helpMessage: ResultCopy.pbrTooltip(context),
                 icon: Icons.assessment,
               ),
             ]),
@@ -1918,36 +2361,16 @@ class _ResultPageState extends State<ResultPage> {
 
           // 현재가/적정가: 좌/우 정렬 + 길면 축소
           clampScale(
-            Row(
-              children: [
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        ResultCopy.currentPriceText(context, _fmtMoney(price)),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  ResultCopy.fairPriceText(context, _fmtMoney(fairPrice)),
+                  style: const TextStyle(fontSize: 12),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        ResultCopy.fairPriceText(context, _fmtMoney(fairPrice)),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
             max: verticalInfo ? 1.35 : 1.25,
           ),
@@ -1995,6 +2418,7 @@ class _ResultPageState extends State<ResultPage> {
     required String label,
     required String value,
     String? helper,
+    String? helpMessage,
     IconData? icon,
   }) {
     return Container(
@@ -2003,6 +2427,7 @@ class _ResultPageState extends State<ResultPage> {
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (icon != null) ...[
             Icon(icon, size: 18, color: Colors.grey[700]),
@@ -2012,123 +2437,66 @@ class _ResultPageState extends State<ResultPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    if (helpMessage != null) ...[
+                      const SizedBox(width: 6),
+                      MiniHelpTip(message: helpMessage),
+                    ],
+                  ],
+                ),
                 if (helper != null) ...[
                   const SizedBox(height: 2),
-                  Text(helper, style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                  Text(
+                    helper,
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
               ],
             ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );
   }
 
-  // ==========================
-  // Sell Guide
-  // ==========================
-  Widget _sellGuideCard({
-    required ValuationResult? result,
-    required String? calcError,
-  }) {
-    if (calcError != null || result == null) return const SizedBox.shrink();
-
-    final gap = result.gapPct;
-    final copy = ResultCopy.sellGuide(context, gap);
-
-    final title = copy.title;
-    final subtitle = copy.subtitle;
-    final icon = copy.icon;
-    final c = copy.color;
-
-    return Card(
-      elevation: 0,
-      color: c.withAlpha(12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: c.withAlpha(60)),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => _openSellGuideSheet(gapPct: gap),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                backgroundColor: c.withAlpha(24),
-                child: Icon(icon, color: c),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: c,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _openSellGuideSheet(gapPct: gap),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: Size.zero,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                          side: const BorderSide(width: 0.8),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        icon: const Icon(Icons.open_in_new, size: 14),
-                        label: Text(
-                          ResultCopy.checklistLabel(context),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _openSellGuideSheet({required double gapPct}) {
+  // 피보나치 안내박스를 바텀시트로 여는 함수 추가
+  void _showFibGuideSheet(PriceFibChartData data) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       useSafeArea: true,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (ctx) {
-        return SellGuideSheet(
-          gapPct: gapPct,
-          onClose: () => Navigator.pop(ctx),
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
+            child: PriceFibGuideCard(
+              data: data,
+              isKoLang: isKoLang,
+              isUS: _isUS,
+            ),
+          ),
         );
       },
     );
@@ -2391,12 +2759,23 @@ class _ResultPageState extends State<ResultPage> {
         );
       }
 
+      final explanationParagraphs =
+          (result != null && calcError == null)
+              ? _buildPdfExplanationParagraphs(
+                  result: result,
+                  rating: rating,
+                )
+              : null;
+
       final labels = ResultPdfLabels(
         inputSectionTitle: t.resultPdfInputSectionTitle,
         resultSectionTitle: t.resultPdfResultSectionTitle,
         ratingSummarySectionTitle: t.resultPdfRatingSummarySectionTitle,
         financialSummarySectionTitle: t.resultPdfFinancialSummarySectionTitle,
         noteSectionTitle: t.resultPdfNoteSectionTitle,
+        explanationSectionTitle: isKoLang
+            ? '이 기업은 지금 이런 상태예요'
+            : 'What this stock looks like now',
 
         currentPriceLabel: t.resultPdfCurrentPriceLabel,
         epsLabel: t.resultPdfEpsLabel,
@@ -2462,6 +2841,7 @@ class _ResultPageState extends State<ResultPage> {
         ratingTitle: rating?.title,
         ratingSummary: rating?.summary,
         calcError: calcError,
+        explanationParagraphs: explanationParagraphs,
         financialPeriodText: null,
         revenueText: null,
         opIncomeText: null,
@@ -2533,6 +2913,14 @@ class _ResultPageState extends State<ResultPage> {
         );
       }
 
+      final explanationParagraphs =
+          (result != null && calcError == null)
+              ? _buildPdfExplanationParagraphs(
+                  result: result,
+                  rating: rating,
+                )
+              : null;
+
       final f = details.current;
 
       String financialPeriodText = '-';
@@ -2550,6 +2938,9 @@ class _ResultPageState extends State<ResultPage> {
         ratingSummarySectionTitle: t.resultPdfRatingSummarySectionTitle,
         financialSummarySectionTitle: t.resultPdfFinancialSummarySectionTitle,
         noteSectionTitle: t.resultPdfNoteSectionTitle,
+        explanationSectionTitle: isKoLang
+            ? '이 기업은 지금 이런 상태예요'
+            : 'What this stock looks like now',
 
         currentPriceLabel: t.resultPdfCurrentPriceLabel,
         epsLabel: t.resultPdfEpsLabel,
@@ -2615,6 +3006,7 @@ class _ResultPageState extends State<ResultPage> {
         ratingTitle: rating?.title,
         ratingSummary: rating?.summary,
         calcError: calcError,
+        explanationParagraphs: explanationParagraphs,
         financialPeriodText: financialPeriodText,
         revenueText: _pdfMoneyWithUsdRef(details.revenue ?? f.revenue, details),
         opIncomeText: _pdfMoneyWithUsdRef(details.opIncome ?? f.opIncome, details),
@@ -2647,6 +3039,215 @@ class _ResultPageState extends State<ResultPage> {
     }
   }
 
+  // PDF용 설명문
+  List<String> _buildPdfExplanationParagraphs({
+    required ValuationResult result,
+    required ValuationRating? rating,
+  }) {
+    final parts = <String>[];
+
+    final priceText = _fmtMoney(_parseDouble(_priceCtrl));
+    final fairPriceText = _fmtMoney(result.fairPrice);
+    final expected = result.expectedReturnPct;
+    final expectedText =
+        '${expected >= 0 ? '+' : ''}${expected.toStringAsFixed(1)}%';
+    final roeText = '${result.roePct.toStringAsFixed(2)}%';
+    final roeOverRText = result.roeOverR.toStringAsFixed(2);
+    final perText = result.per.toStringAsFixed(2);
+    final pbrText = result.pbr.toStringAsFixed(2);
+
+    final fib = _priceFibChart?.positionPct;
+    final fibText = fib == null ? null : '${fib.toStringAsFixed(1)}%';
+
+    // 1) 전체 분위기
+    if (isKoLang) {
+      switch (rating?.level) {
+        case RatingLevel.strongBuy:
+          parts.add(
+            '지금 숫자만 놓고 보면 이 종목은 전반적으로 좋아 보이는 편입니다. 가격은 비교적 싸게 잡히고 있고, 회사의 돈 버는 힘도 괜찮아서 매수 관점에서 긍정적으로 볼 수 있습니다.',
+          );
+          break;
+        case RatingLevel.buy:
+          parts.add(
+            '지금 숫자만 놓고 보면 이 종목은 다소 싸게 보이는 편입니다. 전체적으로는 괜찮지만, 앞으로도 실적 흐름이 계속 유지되는지는 같이 보는 것이 좋습니다.',
+          );
+          break;
+        case RatingLevel.caution:
+          parts.add(
+            '지금 주가는 싸게 보일 수는 있지만, 회사의 수익성은 조금 더 조심해서 볼 필요가 있습니다. 가격만 보고 바로 강하게 들어가기보다는 한 번 더 확인하는 편이 좋습니다.',
+          );
+          break;
+        case RatingLevel.avoid:
+          parts.add(
+            '지금 숫자 기준으로는 가격이 높게 평가되었거나 수익성이 약한 편입니다. 지금은 적극적으로 보기보다는 보수적으로 판단하는 편이 더 맞습니다.',
+          );
+          break;
+        case RatingLevel.neutral:
+        default:
+          parts.add(
+            '지금 이 종목은 아주 싸다고 보기도, 아주 비싸다고 보기도 애매한 상태입니다. 그래서 숫자를 하나씩 천천히 읽어보는 것이 중요합니다.',
+          );
+          break;
+      }
+    } else {
+      switch (rating?.level) {
+        case RatingLevel.strongBuy:
+          parts.add(
+            'Based on the current numbers, this stock looks attractive overall.',
+          );
+          break;
+        case RatingLevel.buy:
+          parts.add(
+            'Based on the current numbers, this stock looks somewhat undervalued overall.',
+          );
+          break;
+        case RatingLevel.caution:
+          parts.add(
+            'The stock may look cheap, but profitability needs a more careful look.',
+          );
+          break;
+        case RatingLevel.avoid:
+          parts.add(
+            'On the current numbers, valuation may be expensive or profitability may be weak.',
+          );
+          break;
+        case RatingLevel.neutral:
+        default:
+          parts.add(
+            'This stock is in a middle zone right now.',
+          );
+          break;
+      }
+    }
+
+    // 2) 기대수익률 / 적정주가
+    if (expected >= 20) {
+      parts.add(
+        isKoLang
+            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceText, 계산된 적정주가는 $fairPriceText입니다. 기대수익률이 플러스이고 폭도 큰 편이라, 계산상으로는 현재 주가보다 적정주가가 더 높게 잡히는 상태라고 볼 수 있습니다.'
+            : 'Expected return is $expectedText. The current price is $priceText and the estimated fair price is $fairPriceText. On this calculation, fair value is meaningfully above the current price.',
+      );
+    } else if (expected >= 0) {
+      parts.add(
+        isKoLang
+            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceText, 계산된 적정주가는 $fairPriceText입니다. 계산상으로는 아직 상승 여지가 남아 있는 편이지만, 아주 큰 차이라고 보기는 어려울 수 있습니다.'
+            : 'Expected return is $expectedText. The current price is $priceText and the estimated fair price is $fairPriceText. There is still upside on this calculation, but the gap may not be very large.',
+      );
+    } else {
+      parts.add(
+        isKoLang
+            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceText, 계산된 적정주가는 $fairPriceText입니다. 기대수익률이 마이너스라는 뜻은, 계산상 현재 주가가 적정주가보다 더 높게 거래되고 있을 가능성이 있다는 뜻입니다.'
+            : 'Expected return is $expectedText. The current price is $priceText and the estimated fair price is $fairPriceText. A negative expected return suggests the stock may be trading above calculated fair value.',
+      );
+    }
+
+    // 3) 요구수익률 / ROE / ROE-r
+    final roeAction = ResultCopy.roeActionExplain(
+      context,
+      roe: result.roePct,
+      roeOverR: result.roeOverR,
+      requiredReturnPct: rPct,
+    );
+
+    parts.add(
+      isKoLang
+          ? '요구수익률은 투자할 때 내가 원하는 기준 수익률이고, 지금은 ${rPct.toStringAsFixed(1)}%입니다. ROE는 $roeText이고, ROE/r는 $roeOverRText입니다. $roeAction'
+          : 'Required return is ${rPct.toStringAsFixed(1)}%. ROE is $roeText and ROE/r is $roeOverRText. $roeAction',
+    );
+
+    // 4) PER / PBR
+    final perExplain = ResultCopy.perLevelExplain(context, result.per);
+    final pbrExplain = ResultCopy.pbrLevelExplain(context, result.pbr);
+    final perPbrAction = ResultCopy.perPbrActionExplain(
+      context,
+      per: result.per,
+      pbr: result.pbr,
+    );
+
+    parts.add(
+      isKoLang
+          ? 'PER는 $perText이고, PBR은 $pbrText입니다. $perExplain $pbrExplain $perPbrAction'
+          : 'PER is $perText and PBR is $pbrText. $perExplain $pbrExplain $perPbrAction',
+    );
+
+    // 5) 배당
+    parts.add(
+      ResultCopy.dividendYieldExplain(context, result.dividendYieldPct),
+    );
+
+    // 6) 피보나치
+    if (fib != null) {
+      String fibExplain;
+
+      if (fib >= 80) {
+        fibExplain = isKoLang
+            ? '피보나치 위치는 $fibText입니다. 최근 몇 년 흐름 중 높은 구간에 가까운 상태입니다. 여기서는 더 치고 올라갈 힘이 충분한지, 아니면 잠시 쉬어갈 자리인지를 함께 판단하는 것이 좋습니다.'
+            : 'Fibonacci position is $fibText. The stock is near the upper end of its recent range, so it is worth judging whether it still has momentum or may need a pause.';
+      } else if (fib >= 60) {
+        fibExplain = isKoLang
+            ? '피보나치 위치는 $fibText입니다. 중간 구간을 넘어선 자리지만, 61.8% 안착 전까지는 본격 상단 구간으로 단정하지 않는 편이 좋습니다. 소액 접근 또는 눌림 확인이 더 자연스러운 구간입니다.'
+            : 'Fibonacci position is $fibText. It is above the middle zone, but before holding above 61.8%, it may be better not to treat it as a full upper-zone breakout.';
+      } else if (fib >= 40) {
+        fibExplain = isKoLang
+            ? '피보나치 위치는 $fibText입니다. 전체 흐름의 중간 지점에 가까운 균형 구간입니다. 방향성이 완전히 정해지지 않은 상태이므로, 다른 수익성 지표와 함께 보는 편이 좋습니다.'
+            : 'Fibonacci position is $fibText. It is in a balanced middle zone, so it is better to read it together with profitability and valuation signals.';
+      } else if (fib >= 20) {
+        fibExplain = isKoLang
+            ? '피보나치 위치는 $fibText입니다. 비교적 낮은 구간에 있어 가격 부담은 덜한 편입니다. 다만 단순히 싸 보인다는 이유만으로 보기보다, 실적과 반등 흐름이 같이 살아나는지 확인하는 편이 좋습니다.'
+            : 'Fibonacci position is $fibText. The stock is in a relatively lower zone, but it is still better to confirm improving earnings and price action rather than buying on price alone.';
+      } else {
+        fibExplain = isKoLang
+            ? '피보나치 위치는 $fibText입니다. 최근 몇 년 흐름 중 바닥권에 가까운 상태입니다. 가격은 저렴해 보일 수 있지만, 정말 기회인지 아니면 힘이 약해서 밀린 것인지 구분해서 볼 필요가 있습니다.'
+            : 'Fibonacci position is $fibText. It is near the bottom of its recent range, so it is important to distinguish a real opportunity from a weak trend.';
+      }
+
+      parts.add(fibExplain);
+    }
+
+    // 7) 마지막 정리
+    if (isKoLang) {
+      if (rating?.level == RatingLevel.strongBuy ||
+          rating?.level == RatingLevel.buy) {
+        parts.add(
+          '정리하면 지금 이 종목은 가격과 수익성 흐름을 함께 봤을 때 종합적으로 안정감과 수익성을 고루 갖춘 상태입니다. 서두르지 않고 차분히 비중을 늘려가는 전략이 유효해 보입니다.',
+        );
+      } else if (rating?.level == RatingLevel.caution) {
+        parts.add(
+          '정리하면 지금 이 종목은 숫자상 싸게 보여서 가격 매력은 있지만 아직은 조심스러운 신호가 섞여 있습니다. 확실한 반등 근거가 나타날 때까지 보수적인 관점을 유지하는 것이 안전합니다.',
+        );
+      } else if (rating?.level == RatingLevel.avoid) {
+        parts.add(
+          '정리하면 지금 이 종목은 지금은 지키는 투자가 중요한 시점입니다. 신규 매수보다는 현재 보유한 비중이 적절한지 냉정하게 점검해 보는 것이 좋습니다.',
+        );
+      } else {
+        parts.add(
+          '정리하면 지금 이 종목은 당장 강하게 움직이기보다는 관심종목으로 두고 숫자 변화를 더 지켜보는 편이 좋습니다.',
+        );
+      }
+    } else {
+      if (rating?.level == RatingLevel.strongBuy ||
+          rating?.level == RatingLevel.buy) {
+        parts.add(
+          'Overall, this looks suitable for gradual buying.',
+        );
+      } else if (rating?.level == RatingLevel.caution) {
+        parts.add(
+          'Overall, this may look cheap, but it is better to stay cautious for now.',
+        );
+      } else if (rating?.level == RatingLevel.avoid) {
+        parts.add(
+          'Overall, this is better reviewed carefully rather than bought more aggressively.',
+        );
+      } else {
+        parts.add(
+          'Overall, this is better watched for now while following future changes in the numbers.',
+        );
+      }
+    }
+
+    return parts;
+  }
+
   // 재무제표 페이지 이동
   void _openFinancialStatementPage() {
     Navigator.push(
@@ -2661,4 +3262,5 @@ class _ResultPageState extends State<ResultPage> {
       ),
     );
   }
+
 }
