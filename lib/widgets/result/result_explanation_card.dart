@@ -337,33 +337,33 @@ class ResultExplanationCard extends StatelessWidget {
     );
 
     // 6) 피보나치 위치
-    if (fib != null) {
-      String fibExplain;
+    // if (fib != null) {
+    //   String fibExplain;
 
-      if (fib >= 80) {
-        fibExplain = isKoLang
-            ? '**피보나치 위치**는 **$fibText**입니다. 최근 몇 년간의 흐름 중 가장 높은 능선에 도달해 있네요. 여기서 더 치고 나갈 동력이 충분한지, 혹은 잠시 쉬어갈 자리인지 **호흡을 가다듬으며 판단할 때**입니다.'
-            : 'Fibonacci position is **$fibText**. It’s near the peak of its recent range. Consider whether it has enough momentum to break higher or needs a breather.';
-      } else if (fib >= 60) {
-        fibExplain = isKoLang
-            ? '**피보나치 위치**는 **$fibText**입니다. 주가에 서서히 탄력이 붙으며 상승 궤도에 올라탄 모습입니다. 특히 61.8% 선 위에서 잘 버텨준다면, **본격적인 상승세를 기대하며 적극적으로 지켜볼 만한 구간**입니다.'
-            : 'Fibonacci position is **$fibText**. The stock is gaining momentum. If it holds above the 61.8% level, it could be a great setup for a trend continuation.';
-      } else if (fib >= 40) {
-        fibExplain = isKoLang
-            ? '**피보나치 위치**는 **$fibText**입니다. 전체적인 흐름의 딱 중간 지점에 와 있네요. 방향성이 결정되지 않은 **균형 잡힌 상태**이므로, 다른 수익성 지표들과 함께 보며 다음 움직임을 예측해 보세요.'
-            : 'Fibonacci position is **$fibText**. It’s at a balanced midpoint. Since the trend is neutral, use other fundamental metrics to decide your next move.';
-      } else if (fib >= 20) {
-        fibExplain = isKoLang
-            ? '**피보나치 위치**는 **$fibText**입니다. 주가가 꽤 낮은 지대까지 내려와 있어 **가격 부담이 적은 구간**입니다. 바닥을 다지고 반등할 준비가 되었는지 실적과 함께 살피면 좋은 기회를 잡을 수 있습니다.'
-            : 'Fibonacci position is **$fibText**. The price is in a comfortable low zone. Check if earnings support a rebound to catch a good entry point.';
-      } else {
-        fibExplain = isKoLang
-            ? '**피보나치 위치**는 **$fibText**입니다. 최근 몇 년간의 흐름 중 가장 낮은 바닥권에 머물고 있습니다. 가격은 매우 저렴해 보이지만, **단순히 싸서 좋은 것인지 아니면 힘이 빠져서 밀린 것인지** 냉정하게 구분해 볼 필요가 있습니다.'
-            : 'Fibonacci position is **$fibText**. It’s at the very bottom of its range. It’s important to distinguish if it’s a "bargain" or a "value trap" before stepping in.';
-      }
+    //   if (fib >= 80) {
+    //     fibExplain = isKoLang
+    //         ? '**피보나치 위치**는 **$fibText**입니다. 최근 몇 년간의 흐름 중 가장 높은 능선에 도달해 있네요. 여기서 더 치고 나갈 동력이 충분한지, 혹은 잠시 쉬어갈 자리인지 **호흡을 가다듬으며 판단할 때**입니다.'
+    //         : 'Fibonacci position is **$fibText**. It’s near the peak of its recent range. Consider whether it has enough momentum to break higher or needs a breather.';
+    //   } else if (fib >= 60) {
+    //     fibExplain = isKoLang
+    //         ? '**피보나치 위치**는 **$fibText**입니다. 주가에 서서히 탄력이 붙으며 상승 궤도에 올라탄 모습입니다. 특히 61.8% 선 위에서 잘 버텨준다면, **본격적인 상승세를 기대하며 적극적으로 지켜볼 만한 구간**입니다.'
+    //         : 'Fibonacci position is **$fibText**. The stock is gaining momentum. If it holds above the 61.8% level, it could be a great setup for a trend continuation.';
+    //   } else if (fib >= 40) {
+    //     fibExplain = isKoLang
+    //         ? '**피보나치 위치**는 **$fibText**입니다. 전체적인 흐름의 딱 중간 지점에 와 있네요. 방향성이 결정되지 않은 **균형 잡힌 상태**이므로, 다른 수익성 지표들과 함께 보며 다음 움직임을 예측해 보세요.'
+    //         : 'Fibonacci position is **$fibText**. It’s at a balanced midpoint. Since the trend is neutral, use other fundamental metrics to decide your next move.';
+    //   } else if (fib >= 20) {
+    //     fibExplain = isKoLang
+    //         ? '**피보나치 위치**는 **$fibText**입니다. 주가가 꽤 낮은 지대까지 내려와 있어 **가격 부담이 적은 구간**입니다. 바닥을 다지고 반등할 준비가 되었는지 실적과 함께 살피면 좋은 기회를 잡을 수 있습니다.'
+    //         : 'Fibonacci position is **$fibText**. The price is in a comfortable low zone. Check if earnings support a rebound to catch a good entry point.';
+    //   } else {
+    //     fibExplain = isKoLang
+    //         ? '**피보나치 위치**는 **$fibText**입니다. 최근 몇 년간의 흐름 중 가장 낮은 바닥권에 머물고 있습니다. 가격은 매우 저렴해 보이지만, **단순히 싸서 좋은 것인지 아니면 힘이 빠져서 밀린 것인지** 냉정하게 구분해 볼 필요가 있습니다.'
+    //         : 'Fibonacci position is **$fibText**. It’s at the very bottom of its range. It’s important to distinguish if it’s a "bargain" or a "value trap" before stepping in.';
+    //   }
 
-      parts.add(fibExplain);
-    }
+    //   parts.add(fibExplain);
+    // }
 
     return parts;
   }

@@ -287,25 +287,32 @@ class UsFmpRepository implements StockRepository {
           .toString()
           .trim();
 
+      final rawIndustry =
+          (m['industry'] ?? m['sector'] ?? m['category'] ?? '')
+              .toString()
+              .trim();
+
       items.add(
         StockSearchItem(
           code: code,
           name: name,
           market: market,
           logoUrl: rawLogo.isEmpty ? null : rawLogo,
+          industry: rawIndustry.isEmpty ? null : rawIndustry,
         ),
       );
 
       if (items.length >= 30) break;
     }
 
-    // ✅ alias로는 잡혔는데 FMP 검색이 비어있으면 UX fallback
+    // alias로는 잡혔는데 FMP 검색이 비어있으면 UX fallback
     if (items.isEmpty && hit != null) {
       return [
         StockSearchItem(
           code: hit.code,
           name: hit.name,
           market: 'US',
+          industry: null,
         ),
       ];
     }
@@ -318,6 +325,7 @@ class UsFmpRepository implements StockRepository {
           code: t,
           name: t,
           market: 'US',
+          industry: null,
         ),
       ];
     }

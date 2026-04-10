@@ -447,11 +447,17 @@ class _SearchPageState extends State<SearchPage> {
         final aliasGroups = SearchAlias.resolveUsGroups(q, limit: 12);
 
         if (aliasGroups.length >= 2) {
+          final resolved = await _resolveAliasGroupsToItems(
+            aliasGroups,
+            tab: Market.us,
+            fallbackMarket: 'US',
+          );
+
           if (!mounted) return;
           if (seq != _searchSeq) return;
 
           setState(() {
-            _results = _aliasGroupsToItems(aliasGroups, market: 'US');
+            _results = resolved;
             _loading = false;
             _error = null;
           });
@@ -466,11 +472,17 @@ class _SearchPageState extends State<SearchPage> {
         final krAliasGroups = SearchAlias.resolveKrGroups(q, limit: 12);
 
         if (krAliasGroups.length >= 2) {
+          final resolved = await _resolveAliasGroupsToItems(
+            krAliasGroups,
+            tab: Market.kr,
+            fallbackMarket: 'KRX',
+          );
+
           if (!mounted) return;
           if (seq != _searchSeq) return;
 
           setState(() {
-            _results = _aliasGroupsToItems(krAliasGroups, market: 'KRX');
+            _results = resolved;
             _loading = false;
             _error = null;
           });
@@ -479,6 +491,7 @@ class _SearchPageState extends State<SearchPage> {
           return;
         }
       }
+
       // 탭에 맞게 쿼리 변환(US: 한글->티커, KR: 한글->코드)
       final mapped = _mapQueryByTab(_tab, q);
 
@@ -578,6 +591,21 @@ class _SearchPageState extends State<SearchPage> {
     final market = s.market.trim();
     if (market.isEmpty) return _isUsItem(s) ? t.marketUs : t.marketUnknown;
     return market;
+  }
+
+  // 업종 헬퍼 2개
+  String? _industryText(StockSearchItem s) {
+    final v = s.industry?.trim();
+    if (v == null || v.isEmpty) return null;
+    return v;
+  }
+
+  String _itemMetaText(StockSearchItem s) {
+    final industry = _industryText(s);
+    if (industry != null) {
+      return '${s.code} · $industry';
+    }
+    return '${s.code} · ${_displayMarketText(s)}';
   }
 
   // 로고 반응형 사이즈
@@ -912,16 +940,36 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   // alisa 결과에도 로고 넣기 함수
-  List<StockSearchItem> _aliasGroupsToItems(List<AliasGroup> groups, {
-    required String market,
-  }) {
-    return groups.map((g) {
+  Future<List<StockSearchItem>> _resolveAliasGroupsToItems(
+    List<AliasGroup> groups, {
+    required Market tab,
+    required String fallbackMarket,
+  }) async {
+    final futures = groups.map((g) async {
+      try {
+        final found = await widget.hub.search(tab, g.code);
+
+        for (final item in found) {
+          if (item.code.trim().toUpperCase() == g.code.trim().toUpperCase()) {
+            return item;
+          }
+        }
+
+        if (found.isNotEmpty) {
+          return found.first;
+        }
+      } catch (_) {
+        // fallback below
+      }
+
       return StockSearchItem(
         code: g.code,
         name: g.primaryName,
-        market: market,
+        market: fallbackMarket,
       );
-    }).toList();
+    });
+
+    return Future.wait(futures);
   }
 
   bool _isLikelyUsAliasQuery(String q) {
@@ -1138,52 +1186,63 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _companyMark(s, size: _responsiveMarkSize(context)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 15,
+                      _companyMark(s, size: _responsiveMarkSize(context)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              displayName,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 15,
+                              ),
+                            ),
+                            if (originalName != null) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                originalName,
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.grey[700],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                      if (originalName != null) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          originalName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.grey[700],
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '${s.code} · ${_displayMarketText(s)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Colors.grey[700],
-                fontSize: 12,
+                  const SizedBox(height: 8),
+                  Text(
+                    _itemMetaText(s),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 6),
             clampScale(
               Text(
                 t.viewValuation,
@@ -1219,16 +1278,19 @@ class _SearchPageState extends State<SearchPage> {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _companyMark(s, size: _responsiveMarkSize(context)),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     displayName,
                     maxLines: 1,
+                    softWrap: false,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
@@ -1237,20 +1299,30 @@ class _SearchPageState extends State<SearchPage> {
                     Text(
                       originalName,
                       maxLines: 1,
+                      softWrap: false,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 2),
                   Text(
-                    "${s.code} · ${_displayMarketText(s)}",
+                    _itemMetaText(s),
                     maxLines: 1,
+                    softWrap: false,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Icon(Icons.chevron_right, color: _accent.withAlpha(220)),
           ],
         ),
@@ -1258,7 +1330,7 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  // 결과 ?? 
+  // 검색 목록 
   Widget _resultCardTile(StockSearchItem s) {
     final displayName = _displayItemName(s);
     final originalName = _displayItemOriginalName(s);
@@ -1269,16 +1341,19 @@ class _SearchPageState extends State<SearchPage> {
         color: _accent2,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _companyMark(s, size: _responsiveMarkSize(context)),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     displayName,
                     maxLines: 1,
+                    softWrap: false,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
@@ -1287,18 +1362,30 @@ class _SearchPageState extends State<SearchPage> {
                     Text(
                       originalName,
                       maxLines: 1,
+                      softWrap: false,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 2),
                   Text(
-                    "${s.code} · ${_displayMarketText(s)}",
-                    style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                    _itemMetaText(s),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Icon(Icons.chevron_right, color: _accent2.withAlpha(220)),
           ],
         ),

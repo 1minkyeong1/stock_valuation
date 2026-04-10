@@ -5,7 +5,7 @@ import '../../utils/finance_rules.dart';
 import '../repository/stock_repository.dart';
 
 class FavoritesStore {
-  static const _k = 'favorites_v2';
+  static const _k = 'favorites_v3';
 
   Future<List<StockSearchItem>> load(Market m) async {
     final sp = await SharedPreferences.getInstance();
@@ -28,6 +28,7 @@ class FavoritesStore {
             name: mm['name']?.toString() ?? '',
             market: mm['market']?.toString() ?? '',
             logoUrl: mm['logoUrl']?.toString(),
+            industry: mm['industry']?.toString(),
           ),
         );
       }
@@ -61,6 +62,7 @@ class FavoritesStore {
       'name': item.name,
       'market': item.market,
       'logoUrl': item.logoUrl,
+      'industry': item.industry,
     });
 
     await sp.setString(_k, jsonEncode(list));

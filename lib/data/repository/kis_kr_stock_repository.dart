@@ -172,11 +172,17 @@ class KisKrStockRepository implements StockRepository {
             .toString()
             .trim();
 
+        final rawIndustry =
+            (mm['industry'] ?? mm['sector'] ?? mm['bizType'] ?? mm['category'] ?? '')
+                .toString()
+                .trim();
+
         return StockSearchItem(
           code: code,
           name: name,
           market: market,
           logoUrl: rawLogo.isEmpty ? null : rawLogo,
+          industry: rawIndustry.isEmpty ? null : rawIndustry,
         );
       })
       .where((x) => x.code.isNotEmpty && x.name.isNotEmpty)
@@ -184,7 +190,14 @@ class KisKrStockRepository implements StockRepository {
 
     // Worker 결과가 비어도 alias가 있으면 1개라도 보여주기
     if (items.isEmpty && hit != null) {
-      return [StockSearchItem(code: hit.code, name: hit.name, market: 'KRX')];
+      return [
+        StockSearchItem(
+          code: hit.code,
+          name: hit.name,
+          market: 'KRX',
+          industry: null,
+        ),
+      ];
     }
 
     return items;

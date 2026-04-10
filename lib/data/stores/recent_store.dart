@@ -5,7 +5,7 @@ import '../../utils/finance_rules.dart';
 import '../repository/stock_repository.dart';
 
 class RecentStore {
-  static const _k = 'recents_v2';
+  static const _k = 'recents_v3';
 
   Future<List<StockSearchItem>> load(Market m) async {
     final sp = await SharedPreferences.getInstance();
@@ -28,6 +28,7 @@ class RecentStore {
             name: mm['name']?.toString() ?? '',
             market: mm['market']?.toString() ?? '',
             logoUrl: mm['logoUrl']?.toString(),
+            industry: mm['industry']?.toString(),
           ),
         );
       }
@@ -50,6 +51,7 @@ class RecentStore {
       'name': item.name,
       'market': item.market,
       'logoUrl': item.logoUrl,
+      'industry': item.industry,
     });
 
     while (list.length > 30) {

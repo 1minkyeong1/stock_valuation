@@ -5,12 +5,14 @@ class StockSearchItem {
   final String name;
   final String market; // "KOSPI", "KOSDAQ", "US" 등 표시용
   final String? logoUrl;
+  final String? industry; // 업종/섹터 표시용
 
   const StockSearchItem({
     required this.code,
     required this.name,
     required this.market,
     this.logoUrl,
+    this.industry,
   });
 }
 

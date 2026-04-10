@@ -73,8 +73,8 @@ class _ResultPageState extends State<ResultPage> {
   PriceFibChartData? _priceFibChart;
   
   // 피보나치 바텀시트로 보여주기
-  int _priceFibMonths = 36;
-  bool _priceFibLoading = false;
+   int _priceFibMonths = 36;
+   bool _priceFibLoading = false;
 
 
   AppLocalizations get t => AppLocalizations.of(context)!;
@@ -239,6 +239,16 @@ class _ResultPageState extends State<ResultPage> {
     }
 
     return enName;
+  }
+
+  // 기업 업종 추가
+  String? get _industryText {
+    if (_isUS) return null;
+
+    final s = widget.item.industry?.trim();
+    if (s == null || s.isEmpty) return null;
+
+    return s;
   }
 
   // 기업 아이콘
@@ -413,7 +423,7 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   // -----------------
-  // View Toggle (눈 아이콘 / rating 카드 탭 / 미싱카드 탭 공통)
+  // View Toggle (rating 카드 탭 / 미싱카드 탭 공통)
   // -----------------
   void _toggleViewMode() {
     if (!mounted) return;
@@ -998,28 +1008,34 @@ class _ResultPageState extends State<ResultPage> {
         _headerCard(name, code),
         const SizedBox(height: 8),
 
-          if (_priceFibChart != null) ...[
-            PriceFibChartCard(
-              data: _priceFibChart!,
-              isKoLang: isKoLang,
-              isUS: _isUS,
-              months: _priceFibMonths,
-              loading: _priceFibLoading,
-              formatMoney: (v) => _fmtMoney(v),
-              onTapGuide: () => _showFibGuideSheet(_priceFibChart!),
-              onSelectMonths: _reloadPriceFibChartOnly,
+          _requiredReturnHeaderCard(),
+          const SizedBox(height: 8),
+
+          if (rating != null) ...[
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: _toggleViewMode,
+              child: _showAdvanced
+                  ? _ratingCardCompact(rating)
+                  : _ratingCardLarge(rating),
             ),
             const SizedBox(height: 8),
           ],
 
-          _requiredReturnHeaderCard(),
+          _missingDataHintCard(),
           const SizedBox(height: 8),
+
+          KeyedSubtree(
+            key: const ValueKey('input_card'),
+            child: _inputCard(),
+          ),
+          const SizedBox(height: 2),
 
           if (calcError == null && result != null) ...[
             _topQuickSummaryCard(
               r: result,
               rating: rating,
-              fib: _priceFibChart,
+             // fib: _priceFibChart,
             ),
             const SizedBox(height: 8),
 
@@ -1037,29 +1053,27 @@ class _ResultPageState extends State<ResultPage> {
                 height: 1.2,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 11),
           ],
 
-          if (rating != null) ...[
-            InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: _toggleViewMode,
-              child: _showAdvanced
-                  ? _ratingCardCompact(rating)
-                  : _ratingCardLarge(rating),
-            ),
-            const SizedBox(height: 8),
-          ],
-
-          _missingDataHintCard(),
-          const SizedBox(height: 8),
-          KeyedSubtree(
-            key: const ValueKey('input_card'),
-            child: _inputCard(),
-          ),
-          const SizedBox(height: 8),
           _resultCard(currentPrice: price, result: result, calcError: calcError),
           const SizedBox(height: 8),
+
+          // 피보나치 차트
+          // if (_priceFibChart != null) ...[
+          //   PriceFibChartCard(
+          //     data: _priceFibChart!,
+          //     isKoLang: isKoLang,
+          //     isUS: _isUS,
+          //     months: _priceFibMonths,
+          //     loading: _priceFibLoading,
+          //     formatMoney: (v) => _fmtMoney(v),
+          //     onTapGuide: () => _showFibGuideSheet(_priceFibChart!),
+          //     onSelectMonths: _reloadPriceFibChartOnly,
+          //   ),
+          //   const SizedBox(height: 8),
+          // ],
+
           if (calcError == null && result != null) ...[
             _explanationSection(
               price: price,
@@ -1068,6 +1082,7 @@ class _ResultPageState extends State<ResultPage> {
             ),
             const SizedBox(height: 8),
           ],
+
           const SizedBox(height: 8),
       ],
     );
@@ -1147,6 +1162,12 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  void _toggleExplanationExpanded() {
+    if (!mounted) return;
+    setState(() => _explanationExpanded = !_explanationExpanded);
+  }
+
+  // 기업결과설명카드
   Widget _collapsedExplanationCard({
     required ValuationResult result,
     required ValuationRating? rating,
@@ -1166,9 +1187,7 @@ class _ResultPageState extends State<ResultPage> {
         side: BorderSide(color: _cInfo.withAlpha(60)),
       ),
       child: InkWell(
-        onTap: () {
-          setState(() => _explanationExpanded = true);
-        },
+        onTap: _toggleExplanationExpanded,
         child: Container(
           decoration: BoxDecoration(
             color: _cInfo.withAlpha(10),
@@ -1265,24 +1284,29 @@ class _ResultPageState extends State<ResultPage> {
               key: const ValueKey('expanded_explanation'),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ResultExplanationCard(
-                  isKoLang: isKoLang,
-                  currentPrice: price,
-                  requiredReturnPct: rPct,
-                  fibPositionPct: _priceFibChart?.positionPct,
-                  formatMoney: _fmtMoney,
-                  result: result,
-                  rating: rating,
-                  accentColor: _accent,
-                  infoColor: _cInfo,
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: _toggleExplanationExpanded,
+                    child: ResultExplanationCard(
+                      isKoLang: isKoLang,
+                      currentPrice: price,
+                      requiredReturnPct: rPct,
+                      fibPositionPct: _priceFibChart?.positionPct,
+                      formatMoney: _fmtMoney,
+                      result: result,
+                      rating: rating,
+                      accentColor: _accent,
+                      infoColor: _cInfo,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: () {
-                      setState(() => _explanationExpanded = false);
-                    },
+                    onPressed: _toggleExplanationExpanded,
                     icon: const Icon(Icons.expand_less),
                     label: Text(isKoLang ? '간단히 보기' : 'Show less'),
                   ),
@@ -1302,7 +1326,11 @@ class _ResultPageState extends State<ResultPage> {
     final f = _fundamentals ?? _initF;
 
     final subtitleName = _headerSubtitleName;
-    final subtitleMeta = '$code · $marketText';
+    final industryText = _industryText;
+
+    final subtitleMeta = industryText != null
+        ? '$code · $industryText'
+        : '$code · $marketText';
 
     return Card(
       elevation: 0,
@@ -1348,21 +1376,32 @@ class _ResultPageState extends State<ResultPage> {
                               if (subtitleName != null) ...[
                                 const SizedBox(height: 4),
                                 Text(
-                                  _headerExpanded
-                                      ? '$subtitleName · $subtitleMeta'
-                                      : subtitleName,
+                                  subtitleName,
                                   maxLines: 1,
+                                  softWrap: false,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey,
                                   ),
                                 ),
-                              ] else if (_headerExpanded) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitleMeta,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ] else ...[
                                 const SizedBox(height: 4),
                                 Text(
                                   subtitleMeta,
                                   maxLines: 1,
+                                  softWrap: false,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 12,
@@ -1986,9 +2025,10 @@ class _ResultPageState extends State<ResultPage> {
   }) {
     final judgmentColor =
         rating?.accent ?? _ratingColor(rating?.level ?? RatingLevel.neutral);
+    final currentPriceText = _fmtMoney(_parseDouble(_priceCtrl));    
 
-    final fibText = fib == null ? '-' : '${fib.positionPct.toStringAsFixed(1)}%';
-    final fibSub = _fibZoneShort(fib);
+    // final fibText = fib == null ? '-' : '${fib.positionPct.toStringAsFixed(1)}%';
+    // final fibSub = _fibZoneShort(fib);
 
     return Card(
       elevation: 0,
@@ -2009,20 +2049,29 @@ class _ResultPageState extends State<ResultPage> {
                   children: [
                     Expanded(
                       child: _topSummaryMetricBox(
-                        title: isKoLang
-                            ? '${(_priceFibMonths / 12).round()}년 위치'
-                            : '${(_priceFibMonths / 12).round()}Y position',
-                        value: fibText,
-                        subtitle: fibSub,
-                        valueColor: _accent.withAlpha(220),
+                        title: isKoLang ? '현재가' : 'Current price',
+                        value: currentPriceText,
+                        subtitle: isKoLang ? '현재 가격' : 'Latest price',
+                        valueColor: Colors.blueGrey,
                       ),
                     ),
+                    // 피보나치용
+                    //  Expanded(
+                    //    child: _topSummaryMetricBox(
+                    //      title: isKoLang
+                    //          ? '${(_priceFibMonths / 12).round()}년 위치'
+                    //          : '${(_priceFibMonths / 12).round()}Y position',
+                    //      value: fibText,
+                    //      subtitle: fibSub,
+                    //      valueColor: _accent.withAlpha(220),
+                    //    ),
+                    //  ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: _topSummaryMetricBox(
-                        title: ResultCopy.fairPriceLabel(context),
-                        value: _fmtMoney(r.fairPrice),
-                        subtitle: "BPS × (ROE / r)",
+                         title: ResultCopy.fairPriceLabel(context),
+                         value: _fmtMoney(r.fairPrice),
+                         subtitle: "BPS × (ROE / r)",
                       ),
                     ),
                   ],
@@ -2235,6 +2284,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
+  // 현재/적정가 바 표시
   Widget _priceFairGauge({required double price, required double fairPrice}) {
     if (price <= 0 || fairPrice <= 0) {
       return Container(
@@ -2361,19 +2411,41 @@ class _ResultPageState extends State<ResultPage> {
 
           // 현재가/적정가: 좌/우 정렬 + 길면 축소
           clampScale(
-            Align(
-              alignment: Alignment.centerRight,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(
-                  ResultCopy.fairPriceText(context, _fmtMoney(fairPrice)),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
+  Row(
+    children: [
+      Expanded(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              isKoLang
+                  ? '현재가: ${_fmtMoney(price)}'
+                  : 'Current: ${_fmtMoney(price)}',
+              style: const TextStyle(fontSize: 10),
             ),
-            max: verticalInfo ? 1.35 : 1.25,
           ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              ResultCopy.fairPriceText(context, _fmtMoney(fairPrice)),
+              style: const TextStyle(fontSize: 10),
+            ),
+          ),
+        ),
+      ),
+    ],
+  ),
+  max: verticalInfo ? 1.35 : 1.25,
+),
         ],
       ),
     );
@@ -3176,33 +3248,33 @@ class _ResultPageState extends State<ResultPage> {
     );
 
     // 6) 피보나치
-    if (fib != null) {
-      String fibExplain;
+    // if (fib != null) {
+    //   String fibExplain;
 
-      if (fib >= 80) {
-        fibExplain = isKoLang
-            ? '피보나치 위치는 $fibText입니다. 최근 몇 년 흐름 중 높은 구간에 가까운 상태입니다. 여기서는 더 치고 올라갈 힘이 충분한지, 아니면 잠시 쉬어갈 자리인지를 함께 판단하는 것이 좋습니다.'
-            : 'Fibonacci position is $fibText. The stock is near the upper end of its recent range, so it is worth judging whether it still has momentum or may need a pause.';
-      } else if (fib >= 60) {
-        fibExplain = isKoLang
-            ? '피보나치 위치는 $fibText입니다. 중간 구간을 넘어선 자리지만, 61.8% 안착 전까지는 본격 상단 구간으로 단정하지 않는 편이 좋습니다. 소액 접근 또는 눌림 확인이 더 자연스러운 구간입니다.'
-            : 'Fibonacci position is $fibText. It is above the middle zone, but before holding above 61.8%, it may be better not to treat it as a full upper-zone breakout.';
-      } else if (fib >= 40) {
-        fibExplain = isKoLang
-            ? '피보나치 위치는 $fibText입니다. 전체 흐름의 중간 지점에 가까운 균형 구간입니다. 방향성이 완전히 정해지지 않은 상태이므로, 다른 수익성 지표와 함께 보는 편이 좋습니다.'
-            : 'Fibonacci position is $fibText. It is in a balanced middle zone, so it is better to read it together with profitability and valuation signals.';
-      } else if (fib >= 20) {
-        fibExplain = isKoLang
-            ? '피보나치 위치는 $fibText입니다. 비교적 낮은 구간에 있어 가격 부담은 덜한 편입니다. 다만 단순히 싸 보인다는 이유만으로 보기보다, 실적과 반등 흐름이 같이 살아나는지 확인하는 편이 좋습니다.'
-            : 'Fibonacci position is $fibText. The stock is in a relatively lower zone, but it is still better to confirm improving earnings and price action rather than buying on price alone.';
-      } else {
-        fibExplain = isKoLang
-            ? '피보나치 위치는 $fibText입니다. 최근 몇 년 흐름 중 바닥권에 가까운 상태입니다. 가격은 저렴해 보일 수 있지만, 정말 기회인지 아니면 힘이 약해서 밀린 것인지 구분해서 볼 필요가 있습니다.'
-            : 'Fibonacci position is $fibText. It is near the bottom of its recent range, so it is important to distinguish a real opportunity from a weak trend.';
-      }
+    //   if (fib >= 80) {
+    //     fibExplain = isKoLang
+    //         ? '피보나치 위치는 $fibText입니다. 최근 몇 년 흐름 중 높은 구간에 가까운 상태입니다. 여기서는 더 치고 올라갈 힘이 충분한지, 아니면 잠시 쉬어갈 자리인지를 함께 판단하는 것이 좋습니다.'
+    //         : 'Fibonacci position is $fibText. The stock is near the upper end of its recent range, so it is worth judging whether it still has momentum or may need a pause.';
+    //   } else if (fib >= 60) {
+    //     fibExplain = isKoLang
+    //         ? '피보나치 위치는 $fibText입니다. 중간 구간을 넘어선 자리지만, 61.8% 안착 전까지는 본격 상단 구간으로 단정하지 않는 편이 좋습니다. 소액 접근 또는 눌림 확인이 더 자연스러운 구간입니다.'
+    //         : 'Fibonacci position is $fibText. It is above the middle zone, but before holding above 61.8%, it may be better not to treat it as a full upper-zone breakout.';
+    //   } else if (fib >= 40) {
+    //     fibExplain = isKoLang
+    //         ? '피보나치 위치는 $fibText입니다. 전체 흐름의 중간 지점에 가까운 균형 구간입니다. 방향성이 완전히 정해지지 않은 상태이므로, 다른 수익성 지표와 함께 보는 편이 좋습니다.'
+    //         : 'Fibonacci position is $fibText. It is in a balanced middle zone, so it is better to read it together with profitability and valuation signals.';
+    //   } else if (fib >= 20) {
+    //     fibExplain = isKoLang
+    //         ? '피보나치 위치는 $fibText입니다. 비교적 낮은 구간에 있어 가격 부담은 덜한 편입니다. 다만 단순히 싸 보인다는 이유만으로 보기보다, 실적과 반등 흐름이 같이 살아나는지 확인하는 편이 좋습니다.'
+    //         : 'Fibonacci position is $fibText. The stock is in a relatively lower zone, but it is still better to confirm improving earnings and price action rather than buying on price alone.';
+    //   } else {
+    //     fibExplain = isKoLang
+    //         ? '피보나치 위치는 $fibText입니다. 최근 몇 년 흐름 중 바닥권에 가까운 상태입니다. 가격은 저렴해 보일 수 있지만, 정말 기회인지 아니면 힘이 약해서 밀린 것인지 구분해서 볼 필요가 있습니다.'
+    //         : 'Fibonacci position is $fibText. It is near the bottom of its recent range, so it is important to distinguish a real opportunity from a weak trend.';
+    //   }
 
-      parts.add(fibExplain);
-    }
+    //   parts.add(fibExplain);
+    // }
 
     // 7) 마지막 정리
     if (isKoLang) {
