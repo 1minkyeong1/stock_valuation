@@ -183,6 +183,7 @@ class KisKrStockRepository implements StockRepository {
           market: market,
           logoUrl: rawLogo.isEmpty ? null : rawLogo,
           industry: rawIndustry.isEmpty ? null : rawIndustry,
+          sector: null,
         );
       })
       .where((x) => x.code.isNotEmpty && x.name.isNotEmpty)
@@ -196,6 +197,7 @@ class KisKrStockRepository implements StockRepository {
           name: hit.name,
           market: 'KRX',
           industry: null,
+          sector: null,
         ),
       ];
     }

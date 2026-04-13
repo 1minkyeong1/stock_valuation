@@ -90,13 +90,40 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     return it.name;
   }
 
-  String _usDisplaySubtitle(UsRankItem it) {
+  String _usDisplaySubTop(UsRankItem it) {
     if (_isKo) {
       final ko = SearchAlias.usPrimaryKoName(it.tickerFmp);
       if (ko == null) return it.tickerDisplay;
       return '${it.tickerDisplay} · ${it.name}';
     }
     return it.tickerDisplay;
+  }
+
+  String? _usDisplayIndustry(UsRankItem it) {
+    final out = SearchAlias.displayUsIndustry(
+      industryEn: it.industry,
+      sectorEn: it.sector,
+      locale: Localizations.localeOf(context),
+    ).trim();
+
+    return out.isEmpty ? null : out;
+  }
+
+  String _krDisplaySubTop(KrRankItem it) {
+    // 한국어 UI: 영문명 · 코드
+    if (_isKo) {
+      final originalName = _displayRankingOriginalName(
+        code: it.code,
+        koName: it.name,
+      );
+      if (originalName != null && originalName.isNotEmpty) {
+        return '${it.code} · $originalName';
+      }
+      return it.code;
+    }
+
+    // 영어 UI: 코드만
+    return it.code;
   }
 
   // 한글 (영어매핑)
@@ -120,6 +147,19 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     final en = SearchAlias.krEnglishName(code)?.trim();
     if (en == null || en.isEmpty || en == koName.trim()) return null;
     return en;
+  }
+
+  // 업종 영문 연결
+  String? _displayRankingIndustry(String? raw) {
+    final s = raw?.trim();
+    if (s == null || s.isEmpty) return null;
+
+    final out = SearchAlias.displayKrIndustry(
+      koIndustry: s,
+      locale: Localizations.localeOf(context),
+    );
+
+    return out.trim().isEmpty ? null : out;
   }
 
   // 랭킹숫자 반응형 사이즈
@@ -253,6 +293,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
       name: it.name,
       market: it.market,
       logoUrl: it.logoUrl,
+      industry: it.industry,
     );
 
     unawaited(
@@ -302,6 +343,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
       name: it.name,
       market: 'US',
       logoUrl: it.logoUrl,
+      industry: it.industry,
+      sector: it.sector,
     );
 
     unawaited(
@@ -479,9 +522,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
       if (!mounted || reqSeq != _usReqSeq) return;
       setState(() {
         _usLoading = false;
-
         if (_usItems.isEmpty) {
-          _usError = null;
+          _usError = t.usRankingError('LOAD_FAILED');
         }
       });
     }
@@ -684,11 +726,14 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           '')
           .toLowerCase();
 
+      final industry = (_displayRankingIndustry(it.industry) ?? '').toLowerCase();    
+
       return displayName.contains(q) ||
           originalName.contains(q) ||
           it.name.toLowerCase().contains(q) ||
           it.code.toLowerCase().contains(q) ||
-          it.market.toLowerCase().contains(q);
+          it.market.toLowerCase().contains(q) || 
+          industry.contains(q);
     }).toList();
   }
 
@@ -698,13 +743,15 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
 
     return _usItems.where((it) {
       final koName = SearchAlias.usPrimaryKoName(it.tickerFmp) ?? '';
+      final industry = (_usDisplayIndustry(it) ?? '').toLowerCase();
 
       return it.name.toLowerCase().contains(q) ||
           it.tickerDisplay.toLowerCase().contains(q) ||
           it.tickerFmp.toLowerCase().contains(q) ||
-          koName.toLowerCase().contains(q);
+          koName.toLowerCase().contains(q) ||
+          industry.contains(q);
     }).toList();
-  }  
+  }
 
   Widget _trailingKr(KrRankItem it) {
     final price = _krLivePrice(it);
@@ -948,7 +995,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   Widget _rankCardTile({
     required int rank,
     required String title,
-    required String subtitle,
+    String? subTitleTop,
+    String? industryText,
     required Widget trailing,
     required VoidCallback onTap,
     Widget? companyMark,
@@ -958,6 +1006,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     final badgeSize = _responsiveSize(context, base: 38, max: 48, step: 12);
     final badgeRadius = _responsiveSize(context, base: 14, max: 18, step: 4);
 
+    final top = subTitleTop?.trim();
+    final industry = industryText?.trim();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -976,6 +1026,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
             ),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: badgeSize,
@@ -1004,29 +1055,47 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                   const SizedBox(width: 12),
                 ],
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                        if (top != null && top.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            top,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                        if (industry != null && industry.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            industry,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: cs.primary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1230,19 +1299,11 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           koName: it.name,
         );
 
-        final originalName = _displayRankingOriginalName(
-          code: it.code,
-          koName: it.name,
-        );
-
-        final subtitle = originalName != null && originalName.isNotEmpty
-            ? '$originalName · ${it.code} · ${it.market}'
-            : '${it.code} · ${it.market}';
-
         return _rankCardTile(
           rank: rank,
           title: displayName,
-          subtitle: subtitle,
+          subTitleTop: _krDisplaySubTop(it),
+          industryText: _displayRankingIndustry(it.industry),
           trailing: _trailingKr(it),
           onTap: () => _openResultKr(it),
           companyMark: _companyMark(
@@ -1316,7 +1377,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         return _rankCardTile(
           rank: rank,
           title: _usDisplayName(it),
-          subtitle: _usDisplaySubtitle(it),
+          subTitleTop: _usDisplaySubTop(it),
+          industryText: _usDisplayIndustry(it),
           trailing: _trailingUs(it),
           onTap: () => _openResultUs(it),
           companyMark: _companyMark(

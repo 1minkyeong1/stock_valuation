@@ -29,6 +29,7 @@ class RecentStore {
             market: mm['market']?.toString() ?? '',
             logoUrl: mm['logoUrl']?.toString(),
             industry: mm['industry']?.toString(),
+            sector: mm['sector']?.toString(),
           ),
         );
       }
@@ -52,6 +53,7 @@ class RecentStore {
       'market': item.market,
       'logoUrl': item.logoUrl,
       'industry': item.industry,
+      'sector': item.sector,
     });
 
     while (list.length > 30) {

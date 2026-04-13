@@ -4911,34 +4911,475 @@ class SearchAlias {
   };
 
 
-    static String? krEnglishName(String code) {
-      final c = code.trim();
-      if (c.isEmpty) return null;
-      return krCodeToEnglishName[c];
+  static String? krEnglishName(String code) {
+    final c = code.trim();
+    if (c.isEmpty) return null;
+    return krCodeToEnglishName[c];
+  }
+
+  static String displayKrName({
+    required String code,
+    required String koName,
+    required Locale locale,
+  }) {
+    if (locale.languageCode == 'en') {
+      return krEnglishName(code) ?? koName;
+    }
+    return koName;
+  }
+
+  static String? displayKrOriginalName({
+    required String code,
+    required String koName,
+    required Locale locale,
+  }) {
+    if (locale.languageCode != 'en') return null;
+
+    final en = krEnglishName(code);
+    if (en == null || en.trim().isEmpty || en == koName) return null;
+    return koName;
+  }
+
+  // -------------------------
+  // 🇰🇷 KR (업종명 -> 영어명)
+  // -------------------------
+  static const Map<String, String> krIndustryToEnglish = {
+    '1차 비철금속 제조업': 'Primary Non-Ferrous Metal Manufacturing',
+    '1차 철강 제조업': 'Primary Steel Manufacturing',
+    '가구 제조업': 'Furniture Manufacturing',
+    '가스유틸리티' : 'Gas Utilities',
+    '가전제품 및 정보통신장비 소매업': 'Retail Sale of Home Appliances and ICT Equipment',
+    '가정용 기기 제조업': 'Household Appliance Manufacturing',
+    '가죽, 가방 및 유사제품 제조업': 'Leather, Bags and Similar Products Manufacturing',
+    '개인 및 가정용품 수리업': 'Repair of Personal and Household Goods',
+    '개인 및 가정용품 임대업': 'Rental of Personal and Household Goods',
+    '건물 건설업': 'Building Construction',
+    '건물설비 설치 공사업': 'Building Equipment Installation',
+    '건축기술, 엔지니어링 및 관련 기술 서비스업':
+        'Architectural, Engineering and Related Technical Services',
+    '건축자재, 철물 및 난방장치 도매업':
+        'Wholesale of Building Materials, Hardware and Heating Equipment',
+    '경비, 경호 및 탐정업': 'Security, Guard and Investigation Services',
+    '고무제품 제조업': 'Rubber Products Manufacturing',
+    '곡물가공품, 전분 및 전분제품 제조업':
+        'Grain Mill Products, Starches and Starch Products Manufacturing',
+    '골판지, 종이 상자 및 종이용기 제조업':
+        'Corrugated Paper, Paper Boxes and Paper Containers Manufacturing',
+    '과실, 채소 가공 및 저장 처리업':
+        'Processing and Preserving of Fruits and Vegetables',
+    '광고업': 'Advertising Services',
+    '교육지원 서비스업': 'Educational Support Services',
+    '구조용 금속제품, 탱크 및 증기발생기 제조업':
+        'Structural Metal Products, Tanks and Steam Generators Manufacturing',
+    '귀금속 및 장신용품 제조업': 'Jewelry and Precious Metal Products Manufacturing',
+    '그외 기타 개인 서비스업': 'Other Personal Services',
+    '그외 기타 운송장비 제조업': 'Other Transport Equipment Manufacturing',
+    '그외 기타 전문, 과학 및 기술 서비스업':
+        'Other Professional, Scientific and Technical Services',
+    '그외 기타 제품 제조업': 'Other Product Manufacturing',
+    '금속 주조업': 'Metal Casting',
+    '금융 지원 서비스업': 'Financial Support Services',
+    '기계장비 및 관련 물품 도매업':
+        'Wholesale of Machinery, Equipment and Related Supplies',
+    '기록매체 복제업': 'Reproduction of Recorded Media',
+    '기반조성 및 시설물 축조관련 전문공사업':
+        'Site Preparation and Specialized Construction Activities',
+    '기초 의약물질 제조업': 'Basic Pharmaceutical Substances Manufacturing',
+    '기초 화학물질 제조업': 'Basic Chemicals Manufacturing',
+    '기타 과학기술 서비스업': 'Other Scientific and Technical Services',
+    '기타 교육기관': 'Other Educational Institutions',
+    '기타 금속 가공제품 제조업': 'Other Fabricated Metal Products Manufacturing',
+    '기타 금융업': 'Other Financial Services',
+    '기타 비금속 광물제품 제조업': 'Other Non-Metallic Mineral Products Manufacturing',
+    '기타 사업지원 서비스업': 'Other Business Support Services',
+    '기타 상품 전문 소매업': 'Other Specialized Retail Sale of Goods',
+    '기타 생활용품 소매업': 'Other Retail Sale of Household Goods',
+    '기타 섬유제품 제조업': 'Other Textile Products Manufacturing',
+    '기타 식품 제조업': 'Other Food Products Manufacturing',
+    '기타 운송관련 서비스업': 'Other Transportation Support Services',
+    '기타 전기장비 제조업': 'Other Electrical Equipment Manufacturing',
+    '기타 전문 도매업': 'Other Specialized Wholesale',
+    '기타 전문 서비스업': 'Other Professional Services',
+    '기타 종이 및 판지 제품 제조업': 'Other Paper and Paperboard Products Manufacturing',
+    '기타 화학제품 제조업': 'Other Chemical Products Manufacturing',
+    '나무제품 제조업': 'Wood Products Manufacturing',
+    '내화, 비내화 요업제품 제조업':
+        'Refractory and Non-Refractory Ceramic Products Manufacturing',
+    '담배 제조업': 'Tobacco Manufacturing',
+    '도로 화물 운송업': 'Road Freight Transport',
+    '도시락 및 식사용 조리식품 제조업': 'Prepared Meal and Lunch Box Manufacturing',
+    '도축, 육류 가공 및 저장 처리업': 'Slaughtering, Meat Processing and Preserving',
+    '동·식물성 유지 및 낙농제품 제조업':
+        'Animal and Vegetable Oils and Dairy Products Manufacturing',
+    '동물용 사료 및 조제식품 제조업': 'Animal Feed and Prepared Animal Food Manufacturing',
+    '떡, 빵 및 과자류 제조업': 'Rice Cakes, Bread and Confectionery Manufacturing',
+    '마그네틱 및 광학 매체 제조업': 'Magnetic and Optical Media Manufacturing',
+    '무기 및 총포탄 제조업': 'Weapons and Ammunition Manufacturing',
+    '무점포 소매업': 'Non-Store Retail Sale',
+    '반도체 제조업': 'Semiconductor Manufacturing',
+    '방적 및 가공사 제조업': 'Spinning and Processed Yarn Manufacturing',
+    '보험 및 연금관련 서비스업': 'Insurance and Pension Related Services',
+    '보험업': 'Insurance',
+    '봉제의복 제조업': 'Apparel Manufacturing',
+    '부동산 관련 서비스업': 'Real Estate Related Services',
+    '부동산 임대 및 공급업': 'Real Estate Leasing and Supply',
+    '비료, 농약 및 살균, 살충제 제조업':
+        'Fertilizers, Pesticides, Disinfectants and Insecticides Manufacturing',
+    '비알코올음료 및 얼음 제조업': 'Non-Alcoholic Beverages and Ice Manufacturing',
+    '사업시설 유지·관리 서비스업': 'Business Facilities Support and Management Services',
+    '사진장비 및 광학기기 제조업': 'Photographic and Optical Instruments Manufacturing',
+    '산업용 기계 및 장비 임대업': 'Rental of Industrial Machinery and Equipment',
+    '산업용 농·축산물 및 동·식물 도매업':
+        'Wholesale of Industrial Agricultural, Livestock, Animal and Plant Products',
+    '상품 종합 도매업': 'General Wholesale Trade',
+    '상품 중개업': 'Commodity Brokerage',
+    '생활용품 도매업': 'Wholesale of Household Goods',
+    '서적, 잡지 및 기타 인쇄물 출판업':
+        'Publishing of Books, Magazines and Other Printed Materials',
+    '석유 정제품 제조업': 'Refined Petroleum Products Manufacturing',
+    '선박 및 보트 건조업': 'Building of Ships and Boats',
+    '섬유, 의복, 신발 및 가죽제품 소매업':
+        'Retail Sale of Textiles, Clothing, Footwear and Leather Goods',
+    '섬유제품 염색, 정리 및 마무리 가공업':
+        'Dyeing, Finishing and Processing of Textile Products',
+    '소프트웨어 개발 및 공급업': 'Software Development and Supply',
+    '수산물 가공 및 저장 처리업': 'Processing and Preserving of Fishery Products',
+    '스포츠 서비스업': 'Sports Services',
+    '시멘트, 석회, 플라스터 및 그 제품 제조업':
+        'Manufacture of Cement, Lime, Plaster and Related Products',
+    '시장조사 및 여론조사업': 'Market Research and Public Opinion Polling',
+    '신발 및 신발 부분품 제조업': 'Footwear and Footwear Parts Manufacturing',
+    '신탁업 및 집합투자업': 'Trusts and Collective Investment Services',
+    '실내건축 및 건축마무리 공사업': 'Interior Construction and Building Finishing Works',
+    '악기 제조업': 'Musical Instruments Manufacturing',
+    '알코올음료 제조업': 'Alcoholic Beverages Manufacturing',
+    '어로 어업': 'Marine Fishing',
+    '여행사 및 기타 여행보조 서비스업': 'Travel Agencies and Other Travel Support Services',
+    '연료 소매업': 'Retail Sale of Fuel',
+    '연료용 가스 제조 및 배관공급업': 'Manufacture and Distribution of Fuel Gas through Mains',
+    '영상 및 음향기기 제조업': 'Audio and Video Equipment Manufacturing',
+    '영상·오디오물 제공 서비스업': 'Audio-Visual Content Provision Services',
+    '영화, 비디오물, 방송프로그램 제작 및 배급업':
+        'Motion Picture, Video and Broadcasting Program Production and Distribution',
+    '오디오물 출판 및 원판 녹음업': 'Sound Recording and Music Publishing',
+    '운동 및 경기용구 제조업': 'Sporting Goods Manufacturing',
+    '운송장비 임대업': 'Rental of Transport Equipment',
+    '유리 및 유리제품 제조업': 'Glass and Glass Products Manufacturing',
+    '유원지 및 기타 오락관련 서비스업': 'Amusement Parks and Other Entertainment Services',
+    '육상 여객 운송업': 'Land Passenger Transport',
+    '은행 및 저축기관': 'Banks and Savings Institutions',
+    '음·식료품 및 담배 도매업': 'Wholesale of Food, Beverages and Tobacco',
+    '음식점업': 'Restaurants and Food Service Activities',
+    '의료용 기기 제조업': 'Medical Device Manufacturing',
+    '의료용품 및 기타 의약 관련제품 제조업':
+        'Medical Supplies and Other Pharmaceutical Related Products Manufacturing',
+    '의복 액세서리 제조업': 'Clothing Accessories Manufacturing',
+    '의약품 제조업': 'Pharmaceutical Manufacturing',
+    '인쇄 및 인쇄관련 산업': 'Printing and Related Support Activities',
+    '일반 교습 학원': 'General Tutoring Academies',
+    '일반 목적용 기계 제조업': 'General Purpose Machinery Manufacturing',
+    '일반 및 생활 숙박시설 운영업': 'General and Residential Accommodation Services',
+    '일차전지 및 이차전지 제조업': 'Primary and Secondary Battery Manufacturing',
+    '자동차 부품 및 내장품 판매업': 'Retail Sale of Motor Vehicle Parts and Accessories',
+    '자동차 신품 부품 제조업': 'Motor Vehicle Parts Manufacturing',
+    '자동차 재제조 부품 제조업': 'Remanufactured Motor Vehicle Parts Manufacturing',
+    '자동차 차체나 트레일러 제조업': 'Motor Vehicle Bodies and Trailers Manufacturing',
+    '자동차 판매업': 'Motor Vehicle Sales',
+    '자동차용 엔진 및 자동차 제조업': 'Motor Vehicle Engines and Motor Vehicle Manufacturing',
+    '자료처리, 호스팅, 포털 및 기타 인터넷 정보매개 서비스업':
+        'Data Processing, Hosting, Portals and Other Internet Information Services',
+    '자연과학 및 공학 연구개발업': 'Research and Development in Natural Sciences and Engineering',
+    '작물 재배업': 'Crop Production',
+    '재 보험업': 'Reinsurance',
+    '전구 및 조명장치 제조업': 'Electric Lamps and Lighting Equipment Manufacturing',
+    '전기 및 통신 공사업': 'Electrical and Telecommunications Installation Works',
+    '전기 통신업': 'Telecommunications',
+    '전기업': 'Electric Power Industry',
+    '전동기, 발전기 및 전기 변환 · 공급 · 제어 장치 제조업':
+        'Electric Motors, Generators, Electrical Transformation, Supply and Control Equipment Manufacturing',
+    '전문디자인업': 'Specialized Design Services',
+    '전자부품 제조업': 'Electronic Components Manufacturing',
+    '절연선 및 케이블 제조업': 'Insulated Wire and Cable Manufacturing',
+    '제재 및 목재 가공업': 'Sawmilling and Wood Processing',
+    '종합 소매업': 'General Retail Trade',
+    '증기, 냉·온수 및 공기조절 공급업': 'Steam, Hot and Cold Water and Air Conditioning Supply',
+    '직물직조 및 직물제품 제조업': 'Weaving and Textile Products Manufacturing',
+    '창작 및 예술관련 서비스업': 'Creative, Arts and Entertainment Related Services',
+    '철도장비 제조업': 'Railway Equipment Manufacturing',
+    '초등 교육기관': 'Primary Education Institutions',
+    '측정, 시험, 항해, 제어 및 기타 정밀기기 제조업; 광학기기 제외':
+        'Measuring, Testing, Navigational, Control and Other Precision Instruments Manufacturing; Excluding Optical Instruments',
+    '컴퓨터 및 주변장치 제조업': 'Computer and Peripheral Equipment Manufacturing',
+    '컴퓨터 프로그래밍, 시스템 통합 및 관리업':
+        'Computer Programming, Systems Integration and Management',
+    '텔레비전 방송업': 'Television Broadcasting',
+    '토목 건설업': 'Civil Engineering Construction',
+    '통신 및 방송 장비 제조업': 'Communication and Broadcasting Equipment Manufacturing',
+    '특수 목적용 기계 제조업': 'Special Purpose Machinery Manufacturing',
+    '펄프, 종이 및 판지 제조업': 'Pulp, Paper and Paperboard Manufacturing',
+    '편조원단 제조업': 'Knitted Fabrics Manufacturing',
+    '편조의복 제조업': 'Knitted Apparel Manufacturing',
+    '폐기물 처리업': 'Waste Treatment and Disposal',
+    '플라스틱제품 제조업': 'Plastic Products Manufacturing',
+    '합성고무 및 플라스틱 물질 제조업':
+        'Synthetic Rubber and Plastic Materials Manufacturing',
+    '항공 여객 운송업': 'Air Passenger Transport',
+    '항공기,우주선 및 부품 제조업': 'Aircraft, Spacecraft and Parts Manufacturing',
+    '해상 운송업': 'Sea and Coastal Water Transport',
+    '해체, 선별 및 원료 재생업': 'Dismantling, Sorting and Materials Recovery',
+    '화학섬유 제조업': 'Man-Made Fibers Manufacturing',
+    '회사 본부 및 경영 컨설팅 서비스업':
+        'Head Offices and Management Consulting Services',
+  };
+
+  static String? krIndustryEnglish(String? industryKo) {
+    final s = industryKo?.trim();
+    if (s == null || s.isEmpty) return null;
+    return krIndustryToEnglish[s];
+  }
+
+  static String displayKrIndustry({
+    required String? koIndustry,
+    required Locale locale,
+  }) {
+    final ko = koIndustry?.trim() ?? '';
+    if (ko.isEmpty) return '';
+
+    if (locale.languageCode == 'ko') {
+      return ko;
     }
 
-    static String displayKrName({
-      required String code,
-      required String koName,
-      required Locale locale,
-    }) {
-      if (locale.languageCode == 'en') {
-        return krEnglishName(code) ?? koName;
-      }
-      return koName;
+    return krIndustryEnglish(ko) ?? ko;
+  }
+
+  // -------------------------
+  // 🇺🇸 US (업종/섹터 -> 한글)
+  // -------------------------
+
+  static String _normIndustry(String s) => s
+      .trim()
+      .replaceAll(RegExp(r'\s+'), ' ');
+
+  static const Map<String, String> usSectorToKo = {
+    // 표준 11개
+    'Technology': '기술',
+    'Healthcare': '헬스케어',
+    'Financial Services': '금융',
+    'Consumer Cyclical': '경기소비재',
+    'Consumer Defensive': '필수소비재',
+    'Communication Services': '커뮤니케이션 서비스',
+    'Industrials': '산업재',
+    'Energy': '에너지',
+    'Utilities': '유틸리티',
+    'Basic Materials': '소재',
+    'Real Estate': '부동산',
+
+    // 자주 섞이는 변형/동의어
+    'Financial': '금융',
+    'Finance': '금융',
+    'Consumer Staples': '필수소비재',
+    'Consumer Discretionary': '경기소비재',
+    'Communication': '커뮤니케이션 서비스',
+    'Industrial': '산업재',
+    'Industrial Goods': '산업재',
+    'Materials': '소재',
+    'BasicMaterial': '소재',
+    'Health Care': '헬스케어',
+    'HealthCare': '헬스케어',
+    'Tech': '기술',
+    'Information Technology': '기술',
+    'Telecommunication Services': '커뮤니케이션 서비스',
+    'Telecom': '커뮤니케이션 서비스',
+    'Telecom Services': '커뮤니케이션 서비스',
+  };
+
+  static const Map<String, String> usIndustryToKo = {
+    // Technology
+    'Consumer Electronics': '소비자 전자제품',
+    'Software - Infrastructure': '소프트웨어 인프라',
+    'Software - Application': '응용 소프트웨어',
+    'Information Technology Services': 'IT 서비스',
+    'Semiconductors': '반도체',
+    'Semiconductor Equipment & Materials': '반도체 장비 및 소재',
+    'Communication Equipment': '통신장비',
+    'Computer Hardware': '컴퓨터 하드웨어',
+    'Electronic Components': '전자부품',
+    'Scientific & Technical Instruments': '과학·정밀 장비',
+    'Solar': '태양광',
+    'Electrical Equipment & Parts': '전기장비 및 부품',
+    'Electronics & Computer Distribution': '전자·컴퓨터 유통',
+    'Internet Content & Information': '인터넷 콘텐츠 및 정보서비스',
+    'Telecom Services': '통신서비스',
+    'Internet Retail': '인터넷 소매',
+    'Auto Manufacturers': '자동차 제조',
+    'Auto Parts': '자동차 부품',
+    'Specialty Retail': '전문 소매',
+    'Home Improvement Retail': '주택개선 소매',
+    'Department Stores': '백화점',
+    'Discount Stores': '할인점',
+    'Apparel Retail': '의류 소매',
+    'Footwear & Accessories': '신발 및 액세서리',
+    'Luxury Goods': '명품',
+    'Travel Services': '여행 서비스',
+    'Lodging': '숙박',
+    'Restaurants': '외식업',
+    'Gambling': '카지노·도박',
+    'Leisure': '레저',
+    'Specialty Business Services': '전문 비즈니스 서비스',
+    'Staffing & Employment Services': '인력·고용 서비스',
+    'Rental & Leasing Services': '렌탈·리스 서비스',
+
+    // Communication Services
+    'Entertainment': '엔터테인먼트',
+    'Broadcasting': '방송',
+    'Publishing': '출판',
+    'Advertising Agencies': '광고 대행',
+    'Electronic Gaming & Multimedia': '전자게임·멀티미디어',
+
+    // Financial Services
+    'Credit Services': '신용서비스',
+    'Banks - Diversified': '종합 은행',
+    'Banks - Regional': '지역 은행',
+    'Mortgage Finance': '주택금융',
+    'Capital Markets': '자본시장',
+    'Asset Management': '자산운용',
+    'Financial Data & Stock Exchanges': '금융데이터·거래소',
+    'Financial Conglomerates': '금융지주',
+    'Insurance - Diversified': '종합 보험',
+    'Insurance - Property & Casualty': '손해보험',
+    'Insurance - Life': '생명보험',
+    'Insurance Brokers': '보험중개',
+    'Insurance - Specialty': '특수 보험',
+
+    // Healthcare
+    'Drug Manufacturers - General': '일반 의약품 제조',
+    'Drug Manufacturers - Specialty & Generic': '전문·제네릭 의약품 제조',
+    'Biotechnology': '생명공학',
+    'Medical Devices': '의료기기',
+    'Medical Instruments & Supplies': '의료기기·소모품',
+    'Diagnostics & Research': '진단 및 연구 서비스',
+    'Healthcare Plans': '건강보험',
+    'Health Information Services': '헬스케어 정보서비스',
+    'Medical Care Facilities': '의료시설',
+    'Pharmaceutical Retailers': '의약품 소매',
+    'Therapeutics': '치료제 개발',
+
+    // Industrials
+    'Aerospace & Defense': '항공우주 및 방위산업',
+    'Specialty Industrial Machinery': '특수 산업기계',
+    'Farm & Heavy Construction Machinery': '농기계·중장비',
+    'Railroads': '철도',
+    'Trucking': '트럭 운송',
+    'Integrated Freight & Logistics': '통합 물류',
+    'Airlines': '항공사',
+    'Airports & Air Services': '공항·항공 서비스',
+    'Marine Shipping': '해운',
+    'Waste Management': '폐기물 처리',
+    'Engineering & Construction': '엔지니어링·건설',
+    'Building Products & Equipment': '건축자재·설비',
+    'Consulting Services': '컨설팅 서비스',
+    'Security & Protection Services': '보안·방호 서비스',
+    'Business Equipment & Supplies': '사무·비즈니스 장비',
+
+    // Energy
+    'Oil & Gas Integrated': '종합 석유·가스',
+    'Oil & Gas E&P': '석유·가스 탐사 및 생산',
+    'Oil & Gas Midstream': '석유·가스 미드스트림',
+    'Oil & Gas Refining & Marketing': '정유 및 마케팅',
+    'Oil & Gas Equipment & Services': '석유·가스 장비 및 서비스',
+    'Thermal Coal': '화력석탄',
+    'Coking Coal': '원료탄',
+    'Uranium': '우라늄',
+
+    // Basic Materials
+    'Chemicals': '화학',
+    'Specialty Chemicals': '정밀화학',
+    'Agricultural Inputs': '농업 투입재',
+    'Gold': '금',
+    'Silver': '은',
+    'Copper': '구리',
+    'Other Industrial Metals & Mining': '기타 산업금속·광업',
+    'Steel': '철강',
+    'Aluminum': '알루미늄',
+    'Paper & Paper Products': '제지·종이제품',
+    'Lumber & Wood Production': '목재 생산',
+    'Building Materials': '건축자재',
+
+    // Consumer Defensive
+    'Beverages - Non-Alcoholic': '비알코올 음료',
+    'Beverages - Wineries & Distilleries': '주류',
+    'Packaged Foods': '포장식품',
+    'Confectioners': '제과',
+    'Tobacco': '담배',
+    'Household & Personal Products': '생활·개인용품',
+    'Grocery Stores': '식료품점',
+    'Food Distribution': '식품 유통',
+    'Farm Products': '농산물',
+    'Consumer Packaged Goods': '소비재 포장상품',
+
+    // Utilities
+    'Utilities - Regulated Electric': '규제 전력 유틸리티',
+    'Utilities - Regulated Gas': '규제 가스 유틸리티',
+    'Utilities - Regulated Water': '규제 수도 유틸리티',
+    'Utilities - Diversified': '복합 유틸리티',
+    'Utilities - Independent Power Producers': '독립 발전사업자',
+    'Renewable Utilities': '재생에너지 유틸리티',
+
+    // Real Estate / REIT
+    'Real Estate Services': '부동산 서비스',
+    'Real Estate - Development': '부동산 개발',
+    'REIT - Industrial': '산업용 리츠',
+    'REIT - Retail': '리테일 리츠',
+    'REIT - Residential': '주거용 리츠',
+    'REIT - Office': '오피스 리츠',
+    'REIT - Specialty': '특수자산 리츠',
+    'REIT - Diversified': '복합 리츠',
+    'REIT - Healthcare Facilities': '헬스케어 시설 리츠',
+    'REIT - Hotel & Motel': '호텔 리츠',
+    'REIT - Mortgage': '모기지 리츠',
+
+    'Telecommunication Services': '커뮤니케이션 서비스',
+    'Conglomerates': '복합기업',
+    'Industrial - Machinery': '산업기계',
+    'Auto - Manufacturers': '자동차 제조',
+  };
+
+  static String? usIndustryKorean(
+    String? industryEn, {
+    String? sectorEn,
+  }) {
+    final industry = industryEn?.trim();
+    if (industry != null && industry.isNotEmpty) {
+      final ko = usIndustryToKo[_normIndustry(industry)];
+      if (ko != null) return ko;
     }
 
-    static String? displayKrOriginalName({
-      required String code,
-      required String koName,
-      required Locale locale,
-    }) {
-      if (locale.languageCode != 'en') return null;
-
-      final en = krEnglishName(code);
-      if (en == null || en.trim().isEmpty || en == koName) return null;
-      return koName;
+    final sector = sectorEn?.trim();
+    if (sector != null && sector.isNotEmpty) {
+      final ko = usSectorToKo[_normIndustry(sector)];
+      if (ko != null) return ko;
     }
+
+    return null;
+  }
+
+  static String displayUsIndustry({
+    required String? industryEn,
+    String? sectorEn,
+    required Locale locale,
+  }) {
+    final raw = (industryEn?.trim().isNotEmpty ?? false)
+        ? industryEn!.trim()
+        : (sectorEn?.trim() ?? '');
+
+    if (raw.isEmpty) return '';
+
+    if (locale.languageCode == 'ko') {
+      return usIndustryKorean(industryEn, sectorEn: sectorEn) ?? raw;
+    }
+
+    return raw;
+  }
 
   // -------------------------
   // 공통 유틸

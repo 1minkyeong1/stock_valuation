@@ -120,7 +120,7 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
         });
         return;
       }
-      // 삭제
+      // (디버깅)삭제해도됨.
       debugPrint('[FavoriteRanking] market=${widget.market} favs=${favs.map((e) => '${e.code}/${e.name}/${e.market}').toList()}');
 
       final entries = (await Future.wait(
@@ -430,13 +430,6 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
 
     if (price <= 0) return null;
     if (f.bps <= 0) return null;
-    //삭제
-    if (item.code == '004910') {
-      debugPrint(
-        '[FavoriteRanking][004910] '
-        'price=$price eps=${f.eps} bps=${f.bps} dps=${f.dps}',
-      );
-    }
 
     return _ValuationSnapshot(
       price: price,
@@ -446,7 +439,6 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
     );
   }
   
-
   double? _fairPrice({
     required double? eps,
     required double? bps,
@@ -507,6 +499,52 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
     final en = SearchAlias.krEnglishName(s.code)?.trim();
     if (en == null || en.isEmpty || en == s.name.trim()) return null;
     return en;
+  }
+
+  // 업종 Us 한글연결
+  String? _displayIndustry(StockSearchItem s) {
+    final hasIndustry = s.industry?.trim().isNotEmpty ?? false;
+    final hasSector = s.sector?.trim().isNotEmpty ?? false;
+    if (!hasIndustry && !hasSector) return null;
+
+    final locale = Localizations.localeOf(context);
+
+    if (widget.market == Market.us) {
+      final out = SearchAlias.displayUsIndustry(
+        industryEn: s.industry,
+        sectorEn: s.sector,
+        locale: locale,
+      ).trim();
+
+      return out.isEmpty ? null : out;
+    }
+
+    final out = SearchAlias.displayKrIndustry(
+      koIndustry: s.industry,
+      locale: locale,
+    ).trim();
+
+    return out.isEmpty ? null : out;
+  }
+
+  // 코드 · 영문명 한 줄로 묶는 helper
+  String _displayMetaTop(StockSearchItem s) {
+    if (widget.market == Market.us) {
+      if (isKoLang) {
+        final en = s.name.trim();
+        if (en.isNotEmpty) {
+          return '${s.code} · $en';
+        }
+      }
+      return s.code;
+    }
+
+    final en = SearchAlias.krEnglishName(s.code)?.trim();
+    if (isKoLang && en != null && en.isNotEmpty && en != s.name.trim()) {
+      return '${s.code} · $en';
+    }
+
+    return s.code;
   }
 
   Future<void> _openResult(StockSearchItem s) async {
@@ -639,7 +677,6 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
                 ...List.generate(_rows.length, (i) {
                   final row = _rows[i];
                   final name = _displayName(row.item);
-                  final original = _displayOriginalName(row.item);
                   final currentPriceText = widget.market == Market.us
                       ? fmtUsdDecimal(row.price, fractionDigits: 2)
                       : fmtWonDecimal(row.price, fractionDigits: 0);
@@ -705,26 +742,29 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
                                       fontSize: 15,
                                     ),
                                   ),
-                                  if (original != null) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      original,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey[700],
-                                      ),
-                                    ),
-                                  ],
                                   const SizedBox(height: 2),
                                   Text(
-                                    row.item.code,
+                                    _displayMetaTop(row.item),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: Colors.grey[700],
                                     ),
                                   ),
+                                  if (_displayIndustry(row.item) != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _displayIndustry(row.item)!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(context).colorScheme.primary,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

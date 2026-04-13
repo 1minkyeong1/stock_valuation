@@ -31,6 +31,7 @@ class KrRankItem {
   final num? change;
   final num? changePct;
   final String? logoUrl;
+  final String? industry;
 
   final num? per;
   final num? pbr;
@@ -51,6 +52,7 @@ class KrRankItem {
     this.change,
     this.changePct,
     this.logoUrl,
+    this.industry,
     this.per,
     this.pbr,
     this.eps,
@@ -87,6 +89,9 @@ class KrRankItem {
       logoUrl: (j['logoUrl'] ?? '').toString().trim().isEmpty
           ? null
           : (j['logoUrl']).toString().trim(),
+      industry: (j['industry'] ?? '').toString().trim().isEmpty
+          ? null
+          : (j['industry'] ?? '').toString().trim(),    
       per: _asNumNullable(j['per']),
       pbr: _asNumNullable(j['pbr']),
       eps: _asNumNullable(j['eps']),
@@ -109,6 +114,8 @@ class UsRankItem {
   final num? change;
   final num? changePct;
   final String? logoUrl;
+  final String? industry;
+  final String? sector;
 
   final num? eps;
   final num? bps;
@@ -130,6 +137,8 @@ class UsRankItem {
     this.change,
     this.changePct,
     this.logoUrl,
+    this.industry,
+    this.sector,
     this.eps,
     this.bps,
     this.dps,
@@ -163,6 +172,12 @@ class UsRankItem {
       logoUrl: (j['logoUrl'] ?? '').toString().trim().isEmpty
           ? null
           : (j['logoUrl']).toString().trim(),
+      industry: (j['industry'] ?? '').toString().trim().isEmpty
+          ? null
+          : (j['industry'] ?? '').toString().trim(),
+      sector: (j['sector'] ?? '').toString().trim().isEmpty
+          ? null
+          : (j['sector'] ?? '').toString().trim(),    
       eps: _asNumNullable(j['eps']),
       bps: _asNumNullable(j['bps']),
       dps: _asNumNullable(j['dps']),

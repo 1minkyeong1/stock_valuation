@@ -241,14 +241,30 @@ class _ResultPageState extends State<ResultPage> {
     return enName;
   }
 
-  // 기업 업종 추가
+  // 기업 업종 표시
   String? get _industryText {
-    if (_isUS) return null;
+    final hasIndustry = widget.item.industry?.trim().isNotEmpty ?? false;
+    final hasSector = widget.item.sector?.trim().isNotEmpty ?? false;
+    if (!hasIndustry && !hasSector) return null;
 
-    final s = widget.item.industry?.trim();
-    if (s == null || s.isEmpty) return null;
+    final locale = Localizations.localeOf(context);
 
-    return s;
+    if (_isUS) {
+      final out = SearchAlias.displayUsIndustry(
+        industryEn: widget.item.industry,
+        sectorEn: widget.item.sector,
+        locale: locale,
+      ).trim();
+
+      return out.isEmpty ? null : out;
+    }
+
+    final out = SearchAlias.displayKrIndustry(
+      koIndustry: widget.item.industry,
+      locale: locale,
+    ).trim();
+
+    return out.isEmpty ? null : out;
   }
 
   // 기업 아이콘
@@ -1248,12 +1264,12 @@ class _ResultPageState extends State<ResultPage> {
                       label: isKoLang ? '적정주가' : 'Fair price',
                       value: _fmtMoney(result.fairPrice),
                     ),
-                    if (fibText != null)
-                      _explanationMiniChip(
-                        label: isKoLang ? '피보나치 위치' : 'Fib position',
-                        value: fibText,
-                        valueColor: _accent.withAlpha(220),
-                      ),
+                    // if (fibText != null)
+                    //   _explanationMiniChip(
+                    //     label: isKoLang ? '피보나치 위치' : 'Fib position',
+                    //     value: fibText,
+                    //     valueColor: _accent.withAlpha(220),
+                    //   ),
                   ],
                 ),
                 const SizedBox(height: 10),

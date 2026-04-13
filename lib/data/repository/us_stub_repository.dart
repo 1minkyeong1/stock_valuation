@@ -22,6 +22,7 @@ class UsStubRepository implements StockRepository {
         market: ex,
         logoUrl: null,
         industry: null,
+        sector: null,
       ),
     ];
   }

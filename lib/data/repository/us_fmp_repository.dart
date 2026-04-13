@@ -287,10 +287,8 @@ class UsFmpRepository implements StockRepository {
           .toString()
           .trim();
 
-      final rawIndustry =
-          (m['industry'] ?? m['sector'] ?? m['category'] ?? '')
-              .toString()
-              .trim();
+      final rawIndustry = (m['industry'] ?? '').toString().trim();
+      final rawSector = (m['sector'] ?? '').toString().trim();
 
       items.add(
         StockSearchItem(
@@ -299,6 +297,7 @@ class UsFmpRepository implements StockRepository {
           market: market,
           logoUrl: rawLogo.isEmpty ? null : rawLogo,
           industry: rawIndustry.isEmpty ? null : rawIndustry,
+          sector: rawSector.isEmpty ? null : rawSector,
         ),
       );
 
@@ -313,6 +312,7 @@ class UsFmpRepository implements StockRepository {
           name: hit.name,
           market: 'US',
           industry: null,
+          sector: null,
         ),
       ];
     }
@@ -326,6 +326,7 @@ class UsFmpRepository implements StockRepository {
           name: t,
           market: 'US',
           industry: null,
+          sector: null,
         ),
       ];
     }

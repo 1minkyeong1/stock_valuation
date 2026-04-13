@@ -593,11 +593,30 @@ class _SearchPageState extends State<SearchPage> {
     return market;
   }
 
-  // 업종 헬퍼 2개
+  // 업종 헬퍼
   String? _industryText(StockSearchItem s) {
-    final v = s.industry?.trim();
-    if (v == null || v.isEmpty) return null;
-    return v;
+    final hasIndustry = s.industry?.trim().isNotEmpty ?? false;
+    final hasSector = s.sector?.trim().isNotEmpty ?? false;
+    if (!hasIndustry && !hasSector) return null;
+
+    final locale = Localizations.localeOf(context);
+
+    if (_isUsItem(s)) {
+      final out = SearchAlias.displayUsIndustry(
+        industryEn: s.industry,
+        sectorEn: s.sector,
+        locale: locale,
+      ).trim();
+
+      return out.isEmpty ? null : out;
+    }
+
+    final out = SearchAlias.displayKrIndustry(
+      koIndustry: s.industry,
+      locale: locale,
+    ).trim();
+
+    return out.isEmpty ? null : out;
   }
 
   String _itemMetaText(StockSearchItem s) {
