@@ -233,8 +233,8 @@ class ResultExplanationCard extends StatelessWidget {
     final perText = result.per.toStringAsFixed(2);
     final pbrText = result.pbr.toStringAsFixed(2);
 
-    final fib = fibPositionPct;
-    final fibText = fib == null ? null : '${fib.toStringAsFixed(1)}%';
+  //  final fib = fibPositionPct;
+   // final fibText = fib == null ? null : '${fib.toStringAsFixed(1)}%';
 
     // 1) 전체 분위기
     String overall;
