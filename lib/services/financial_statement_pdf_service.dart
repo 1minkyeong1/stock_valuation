@@ -189,11 +189,14 @@ class FinancialStatementPdfService {
             ),
           ],
           pw.SizedBox(height: 10),
-          pw.Text(data.sourceText, style: const pw.TextStyle(fontSize: 10)),
           if (data.metaText != null && data.metaText!.trim().isNotEmpty) ...[
-            pw.SizedBox(height: 5),
-            pw.Text(data.metaText!, style: const pw.TextStyle(fontSize: 10)),
+            ..._metaLines(data.metaText!),
+            pw.SizedBox(height: 7),
           ],
+          pw.Text(
+            data.sourceText,
+            style: const pw.TextStyle(fontSize: 10),
+          ),
 
           pw.SizedBox(height: 14),
           _section(
@@ -324,6 +327,36 @@ class FinancialStatementPdfService {
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+
+  List<pw.Widget> _metaLines(String text) {
+    final lines = text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+
+    final out = <pw.Widget>[];
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+
+      out.add(
+        pw.Text(
+          line,
+          style: const pw.TextStyle(fontSize: 10),
+        ),
+      );
+
+      if (i != lines.length - 1) {
+        final isIndustryLine =
+            line.startsWith('업종:') || line.startsWith('Industry:');
+
+        out.add(
+          pw.SizedBox(height: isIndustryLine ? 6 : 2),
+        );
+      }
+    }
+    return out;
+  }
 
   pw.Widget _section(String title, List<pw.Widget> children) {
     return pw.Container(

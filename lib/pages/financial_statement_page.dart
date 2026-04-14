@@ -154,6 +154,36 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     );
   }
 
+  // 업종 헬퍼
+  String? get _industryText {
+    final hasIndustry = widget.item.industry?.trim().isNotEmpty ?? false;
+    final hasSector = widget.item.sector?.trim().isNotEmpty ?? false;
+    if (!hasIndustry && !hasSector) return null;
+
+    final locale = Localizations.localeOf(context);
+
+    if (_isUS) {
+      final out = SearchAlias.displayUsIndustry(
+        industryEn: widget.item.industry,
+        sectorEn: widget.item.sector,
+        locale: locale,
+      ).trim();
+
+      return out.isEmpty ? null : out;
+    }
+
+    final out = SearchAlias.displayKrIndustry(
+      koIndustry: widget.item.industry,
+      locale: locale,
+    ).trim();
+
+    return out.isEmpty ? null : out;
+  }
+
+  String _industryMetaText(String industry) {
+    return isKoLang ? '업종: $industry' : 'Industry: $industry';
+  }
+
   bool get _isLand => MediaQuery.of(context).orientation == Orientation.landscape;
 
   String _fmtBasDt(String yyyymmdd) {
@@ -377,6 +407,7 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     required StockFundamentals f,
   }) {
     final meta = _metaLine(f);
+    final industry = _industryText;
 
     return Card(
       elevation: 0,
@@ -412,10 +443,20 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 6),
+            if (industry != null && industry.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                _industryMetaText(industry),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+
+            const SizedBox(height: 8),
             Text(
               FinancialStatementCopy.sourceText(context, widget.market),
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
+
             if (meta.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(
@@ -903,6 +944,11 @@ class _FinancialStatementPageState extends State<FinancialStatementPage> {
     StockFinancialDetails? d,
   ) {
     final lines = <String>[];
+
+    final industry = _industryText;
+    if (industry != null && industry.trim().isNotEmpty) {
+      lines.add(isKoLang ? '업종: $industry' : 'Industry: $industry');
+    }
 
     final meta = _metaLine(f);
     if (meta.isNotEmpty) {

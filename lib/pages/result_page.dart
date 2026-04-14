@@ -267,6 +267,22 @@ class _ResultPageState extends State<ResultPage> {
     return out.isEmpty ? null : out;
   }
 
+  String? _resultPdfMetaText() {
+    final lines = <String>[];
+
+    final metric = _metricLabel();
+    if (metric != null && metric.trim().isNotEmpty) {
+      lines.add(metric);
+    }
+
+    final industry = _industryText;
+    if (industry != null && industry.trim().isNotEmpty) {
+      lines.add(isKoLang ? '업종: $industry' : 'Industry: $industry');
+    }
+
+    return lines.isEmpty ? null : lines.join('\n');
+  }
+
   // 기업 아이콘
   String _headerMarkText() {
     final name = _displayName.trim();
@@ -2731,6 +2747,11 @@ class _ResultPageState extends State<ResultPage> {
     final f = _fundamentals ?? _initF;
     final lines = <String>[];
 
+    final industry = _industryText;
+    if (industry != null && industry.trim().isNotEmpty) {
+      lines.add(isKoLang ? '업종: $industry' : 'Industry: $industry');
+    }
+
     final metricHint = _metricLabel();
     if (metricHint != null && metricHint.trim().isNotEmpty) {
       lines.add(metricHint);
@@ -2907,7 +2928,7 @@ class _ResultPageState extends State<ResultPage> {
             : (isKoLang
                 ? '출처: FMP(제공 범위에 따라 값이 비어 있을 수 있음)'
                 : 'Source: FMP (some values may be empty depending on coverage)'),
-        metaText: _buildPdfMetaText(),
+        metaText: _buildPdfMetaText(details: null),
         includeEvaluation: true,
         includeFinancials: false,
         currentPriceText: _fmtMoney(price),
