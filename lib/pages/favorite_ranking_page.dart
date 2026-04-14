@@ -487,20 +487,6 @@ class _FavoriteRankingPageState extends State<FavoriteRankingPage> {
     );
   }
 
-  String? _displayOriginalName(StockSearchItem s) {
-    if (widget.market == Market.us) {
-      if (!isKoLang) return null;
-      final ko = SearchAlias.usPrimaryKoName(s.code);
-      final en = s.name.trim();
-      if (ko == null || en.isEmpty || ko == en) return null;
-      return en;
-    }
-
-    final en = SearchAlias.krEnglishName(s.code)?.trim();
-    if (en == null || en.isEmpty || en == s.name.trim()) return null;
-    return en;
-  }
-
   // 업종 Us 한글연결
   String? _displayIndustry(StockSearchItem s) {
     final hasIndustry = s.industry?.trim().isNotEmpty ?? false;
