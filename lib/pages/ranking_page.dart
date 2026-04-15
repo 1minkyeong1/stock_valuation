@@ -37,6 +37,21 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
   late final TabController _tab;
   final _recentStore = RecentStore();
 
+  // 가로모드
+  bool get _isLandscape =>
+    MediaQuery.of(context).orientation == Orientation.landscape;
+
+  // 가로모드용 상단 스크롤 헤더
+  Widget _buildScrollableTopControls({required bool isKr}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildPinnedRankSearchBox(isKrOverride: isKr),
+        _requiredReturnRankingCard(isKrOverride: isKr),
+      ],
+    );
+  }  
+
   // 번역
   AppLocalizations get t => AppLocalizations.of(context)!;
 
@@ -1006,6 +1021,13 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     final badgeSize = _responsiveSize(context, base: 38, max: 48, step: 12);
     final badgeRadius = _responsiveSize(context, base: 14, max: 18, step: 4);
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final trailingWidth = screenWidth < 360
+        ? 112.0
+        : screenWidth < 400
+            ? 120.0
+            : 132.0;
+
     final top = subTitleTop?.trim();
     final industry = industryText?.trim();
 
@@ -1052,7 +1074,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                 const SizedBox(width: 10),
                 if (companyMark != null) ...[
                   companyMark,
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                 ],
                 Expanded(
                   child: Padding(
@@ -1098,9 +1120,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 SizedBox(
-                  width: 160,
+                  width: trailingWidth,
                   child: trailing,
                 ),
               ],
@@ -1232,7 +1254,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildKrBody() {
+  Widget _buildKrBody({bool includeTopControls = false}) {
     final visible = _krVisibleItems;
 
     if (_krLoading) {
@@ -1281,9 +1303,14 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: visible.length + 1,
+      itemCount: visible.length + (includeTopControls ? 2 : 1),
       itemBuilder: (context, i) {
-        if (i == 0) {
+        if (includeTopControls && i == 0) {
+          return _buildScrollableTopControls(isKr: true);
+        }
+
+        final metaIndex = includeTopControls ? 1 : 0;
+        if (i == metaIndex) {
           return _metaRow(
             fetchedAt: _krFetchedAt,
             count: visible.length,
@@ -1291,8 +1318,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           );
         }
 
-        final it = visible[i - 1];
-        final rank = i;
+        final itemIndex = i - (includeTopControls ? 2 : 1);
+        final it = visible[itemIndex];
+        final rank = itemIndex + 1;
 
         final displayName = _displayRankingName(
           code: it.code,
@@ -1316,7 +1344,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildUsBody() {
+  Widget _buildUsBody({bool includeTopControls = false}) {
     final visible = _usVisibleItems;
 
     if (_usLoading) {
@@ -1361,9 +1389,14 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: visible.length + 1,
+      itemCount: visible.length + (includeTopControls ? 2 : 1),
       itemBuilder: (context, i) {
-        if (i == 0) {
+        if (includeTopControls && i == 0) {
+          return _buildScrollableTopControls(isKr: false);
+        }
+
+        final metaIndex = includeTopControls ? 1 : 0;
+        if (i == metaIndex) {
           return _metaRow(
             fetchedAt: _usFetchedAt,
             count: visible.length,
@@ -1371,8 +1404,9 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
           );
         }
 
-        final it = visible[i - 1];
-        final rank = i;
+        final itemIndex = i - (includeTopControls ? 2 : 1);
+        final it = visible[itemIndex];
+        final rank = itemIndex + 1;
 
         return _rankCardTile(
           rank: rank,
@@ -1485,36 +1519,50 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
       body: SafeArea(
         top: false,
         bottom: true,
-        child: Column(
-          children: [
-            _buildPinnedRankSearchBox(),
-            _requiredReturnRankingCard(),
-            Expanded(
-              child: TabBarView(
+        child: _isLandscape
+            ? TabBarView(
                 controller: _tab,
                 children: [
                   RefreshIndicator(
                     onRefresh: _loadKr,
-                    child: _buildKrBody(),
+                    child: _buildKrBody(includeTopControls: true),
                   ),
                   RefreshIndicator(
                     onRefresh: _loadUs,
-                    child: _buildUsBody(),
+                    child: _buildUsBody(includeTopControls: true),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  _buildPinnedRankSearchBox(),
+                  _requiredReturnRankingCard(),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tab,
+                      children: [
+                        RefreshIndicator(
+                          onRefresh: _loadKr,
+                          child: _buildKrBody(),
+                        ),
+                        RefreshIndicator(
+                          onRefresh: _loadUs,
+                          child: _buildUsBody(),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
 
   // 고정 검색창
-  Widget _buildPinnedRankSearchBox() {
+  Widget _buildPinnedRankSearchBox({bool? isKrOverride}) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final isKr = _tab.index == 0;
+    final isKr = isKrOverride ?? (_tab.index == 0);
 
     final ctrl = isKr ? _krRankSearchCtrl : _usRankSearchCtrl;
     final hint = isKr ? t.krRankSearchHint : t.usRankSearchHint;
@@ -1624,8 +1672,8 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
     );
   }
 
-  Widget _requiredReturnRankingCard() {
-    final isKr = _tab.index == 0;
+  Widget _requiredReturnRankingCard({bool? isKrOverride}) {
+    final isKr = isKrOverride ?? (_tab.index == 0);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 

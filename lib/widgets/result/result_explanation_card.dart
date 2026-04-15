@@ -87,10 +87,10 @@ class ResultExplanationCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
-              ...bodyParagraphs.map(_bulletParagraph),
+              ...bodyParagraphs.map((text) => _bulletParagraph(context, text)),
 
               const SizedBox(height: 2),
-              _summaryParagraph(summaryText),
+              _summaryParagraph(context, summaryText),
             ],
           ),
         ),
@@ -98,7 +98,7 @@ class ResultExplanationCard extends StatelessWidget {
     );
   }
 
-  Widget _bulletParagraph(String text) {
+  Widget _bulletParagraph(BuildContext context, String text) {
     final base = TextStyle(
       fontSize: 13.4,
       height: 1.72,
@@ -132,6 +132,7 @@ class ResultExplanationCard extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: RichText(
+              textScaler: MediaQuery.textScalerOf(context),
               text: TextSpan(
                 children: _buildBoldSpans(
                   text,
@@ -146,7 +147,7 @@ class ResultExplanationCard extends StatelessWidget {
     );
   }
 
-  Widget _summaryParagraph(String text) {
+  Widget _summaryParagraph(BuildContext context, String text) {
     final base = TextStyle(
       fontSize: 13.4,
       height: 1.68,
@@ -171,6 +172,7 @@ class ResultExplanationCard extends StatelessWidget {
         border: Border.all(color: accentColor.withAlpha(45)),
       ),
       child: RichText(
+        textScaler: MediaQuery.textScalerOf(context),
         text: TextSpan(
           children: _buildBoldSpans(
             text,
@@ -217,21 +219,44 @@ class ResultExplanationCard extends StatelessWidget {
     return spans;
   }
 
+  String _withWon(String text) {
+    final s = text.trim();
+
+    if (!isKoLang) return text;
+    if (s.isEmpty || s == '-') return text;
+
+    // 달러 표시는 그대로 둠
+    if (s.contains('\$')) return text;
+
+    if (s.endsWith('원')) return text;
+    return '$text원';
+  }
+
+  String _withBa(String text) {
+    final s = text.trim();
+
+    if (!isKoLang) return text;
+    if (s.isEmpty || s == '-') return text;
+    if (s.endsWith('배')) return text;
+
+    return '$text배';
+  }
+
   List<String> _buildBodyParagraphs(BuildContext context) {
     final parts = <String>[];
 
-    final fairPriceText = formatMoney(result.fairPrice);
-    final priceText = formatMoney(currentPrice);
+    final fairPriceText = _withWon(formatMoney(result.fairPrice));
+    final priceText = _withWon(formatMoney(currentPrice));
 
     final expected = result.expectedReturnPct;
     final expectedText =
         '${expected >= 0 ? '+' : ''}${expected.toStringAsFixed(1)}%';
 
-  //  final gapText = '${result.gapPct.toStringAsFixed(1)}%';
+    //  final gapText = '${result.gapPct.toStringAsFixed(1)}%';
     final roeText = '${result.roePct.toStringAsFixed(2)}%';
-    final roeOverRText = result.roeOverR.toStringAsFixed(2);
-    final perText = result.per.toStringAsFixed(2);
-    final pbrText = result.pbr.toStringAsFixed(2);
+    final roeOverRText = _withBa(result.roeOverR.toStringAsFixed(2));
+    final perText = _withBa(result.per.toStringAsFixed(2));
+    final pbrText = _withBa(result.pbr.toStringAsFixed(2));
 
   //  final fib = fibPositionPct;
    // final fibText = fib == null ? null : '${fib.toStringAsFixed(1)}%';

@@ -696,28 +696,9 @@ class _ResultPageState extends State<ResultPage> {
           onTimeout: () => null,
         );
 
-        final fd = _isUS ? 2 : 0;
-
         if (saved != null) {
-          if (saved.eps != 0) {
-            _epsCtrl.text = _isUS
-                ? fmtUsdDecimal(saved.eps, fractionDigits: fd).replaceAll('\$', '')
-                : fmtWonDecimal(saved.eps, fractionDigits: fd);
-          }
-
-          if (saved.bps != 0) {
-            _bpsCtrl.text = _isUS
-                ? fmtUsdDecimal(saved.bps, fractionDigits: fd).replaceAll('\$', '')
-                : fmtWonDecimal(saved.bps, fractionDigits: fd);
-          }
-
-          if (saved.dps != 0) {
-            _dpsCtrl.text = _isUS
-                ? fmtUsdDecimal(saved.dps, fractionDigits: fd).replaceAll('\$', '')
-                : fmtWonDecimal(saved.dps, fractionDigits: fd);
-          }
-
-          // 요구수익률의 입력창 숫자와 실제 rPct 값이 항상 같이 맞춰짐
+          // 최신 조회한 EPS / BPS / DPS 는 유지
+          // 사용자가 마지막에 설정한 요구수익률만 복원
           if (widget.initialRequiredReturnPct == null) {
             rPct = saved.rPct;
             _rPctCtrl.text = rPct.toStringAsFixed(1);
@@ -1132,7 +1113,7 @@ class _ResultPageState extends State<ResultPage> {
         case RatingLevel.strongBuy:
           return '계산된 가치 대비 상당히 저평가된 상태입니다. $expectedText 수준의 높은 기대수익률을 목표로 공격적인 검토가 가능한 구간입니다.';
         case RatingLevel.buy:
-          return '현재 주가는 적정가보다 낮게 형성되어 있습니다. expectedText 정도의 상승 여력이 있어, 긍정적인 관점으로 지켜볼 만한 시점입니다.';
+          return '현재 주가는 적정가보다 낮게 형성되어 있습니다. $expectedText 정도의 상승 여력이 있어, 긍정적인 관점으로 지켜볼 만한 시점입니다.';
         case RatingLevel.caution:
           return '주가는 싸 보일 수 있지만 수익성 지표가 다소 불안정합니다. 가격만 보고 진입하기보다 실적 회복 여부를 먼저 확인하는 것이 안전합니다.';
         case RatingLevel.avoid:
@@ -1364,6 +1345,11 @@ class _ResultPageState extends State<ResultPage> {
         ? '$code · $industryText'
         : '$code · $marketText';
 
+    final expandedTextMaxLines = _headerExpanded ? null : 1;
+    final expandedTextSoftWrap = _headerExpanded;
+    final expandedTextOverflow =
+        _headerExpanded ? TextOverflow.visible : TextOverflow.ellipsis;    
+
     return Card(
       elevation: 0,
       color: Colors.transparent,
@@ -1400,44 +1386,51 @@ class _ResultPageState extends State<ResultPage> {
                             children: [
                               Text(
                                 name,
+                                maxLines: expandedTextMaxLines,
+                                softWrap: expandedTextSoftWrap,
+                                overflow: expandedTextOverflow,
                                 style: const TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
+                                  height: 1.2,
                                 ),
                               ),
                               if (subtitleName != null) ...[
                                 const SizedBox(height: 4),
                                 Text(
                                   subtitleName,
-                                  maxLines: 1,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: expandedTextMaxLines,
+                                  softWrap: expandedTextSoftWrap,
+                                  overflow: expandedTextOverflow,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey,
+                                    height: 1.25,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   subtitleMeta,
-                                  maxLines: 1,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: expandedTextMaxLines,
+                                  softWrap: expandedTextSoftWrap,
+                                  overflow: expandedTextOverflow,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey,
+                                    height: 1.25,
                                   ),
                                 ),
                               ] else ...[
                                 const SizedBox(height: 4),
                                 Text(
                                   subtitleMeta,
-                                  maxLines: 1,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: expandedTextMaxLines,
+                                  softWrap: expandedTextSoftWrap,
+                                  overflow: expandedTextOverflow,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey,
+                                    height: 1.25,
                                   ),
                                 ),
                               ],
@@ -3168,6 +3161,33 @@ class _ResultPageState extends State<ResultPage> {
     final fib = _priceFibChart?.positionPct;
     final fibText = fib == null ? null : '${fib.toStringAsFixed(1)}%';
 
+    final priceTextWithUnit =
+        _isUS || priceText.trim().isEmpty || priceText.trim() == '-'
+            ? priceText
+            : (priceText.trim().endsWith('원') ? priceText : '$priceText원');
+
+    final fairPriceTextWithUnit =
+        _isUS || fairPriceText.trim().isEmpty || fairPriceText.trim() == '-'
+            ? fairPriceText
+            : (fairPriceText.trim().endsWith('원') ? fairPriceText : '$fairPriceText원');
+
+    final roeOverRTextWithUnit =
+        isKoLang && roeOverRText.trim().isNotEmpty && roeOverRText.trim() != '-'
+            ? (roeOverRText.trim().endsWith('배')
+                ? roeOverRText
+                : '${roeOverRText}배')
+            : roeOverRText;        
+
+    final perTextWithUnit =
+        isKoLang && perText.trim().isNotEmpty && perText.trim() != '-'
+            ? (perText.trim().endsWith('배') ? perText : '${perText}배')
+            : perText;
+
+    final pbrTextWithUnit =
+        isKoLang && pbrText.trim().isNotEmpty && pbrText.trim() != '-'
+            ? (pbrText.trim().endsWith('배') ? pbrText : '${pbrText}배')
+            : pbrText;        
+
     // 1) 전체 분위기
     if (isKoLang) {
       switch (rating?.level) {
@@ -3233,19 +3253,19 @@ class _ResultPageState extends State<ResultPage> {
     if (expected >= 20) {
       parts.add(
         isKoLang
-            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceText, 계산된 적정주가는 $fairPriceText입니다. 기대수익률이 플러스이고 폭도 큰 편이라, 계산상으로는 현재 주가보다 적정주가가 더 높게 잡히는 상태라고 볼 수 있습니다.'
+            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceTextWithUnit, 계산된 적정주가는 $fairPriceTextWithUnit입니다. 기대수익률이 플러스이고 폭도 큰 편이라, 계산상으로는 현재 주가보다 적정주가가 더 높게 잡히는 상태라고 볼 수 있습니다.'
             : 'Expected return is $expectedText. The current price is $priceText and the estimated fair price is $fairPriceText. On this calculation, fair value is meaningfully above the current price.',
       );
     } else if (expected >= 0) {
       parts.add(
         isKoLang
-            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceText, 계산된 적정주가는 $fairPriceText입니다. 계산상으로는 아직 상승 여지가 남아 있는 편이지만, 아주 큰 차이라고 보기는 어려울 수 있습니다.'
+            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceTextWithUnit, 계산된 적정주가는 $fairPriceTextWithUnit입니다. 계산상으로는 아직 상승 여지가 남아 있는 편이지만, 아주 큰 차이라고 보기는 어려울 수 있습니다.'
             : 'Expected return is $expectedText. The current price is $priceText and the estimated fair price is $fairPriceText. There is still upside on this calculation, but the gap may not be very large.',
       );
     } else {
       parts.add(
         isKoLang
-            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceText, 계산된 적정주가는 $fairPriceText입니다. 기대수익률이 마이너스라는 뜻은, 계산상 현재 주가가 적정주가보다 더 높게 거래되고 있을 가능성이 있다는 뜻입니다.'
+            ? '기대수익률은 $expectedText입니다. 현재 주가는 $priceTextWithUnit, 계산된 적정주가는 $fairPriceTextWithUnit입니다. 기대수익률이 마이너스라는 뜻은, 계산상 현재 주가가 적정주가보다 더 높게 거래되고 있을 가능성이 있다는 뜻입니다.'
             : 'Expected return is $expectedText. The current price is $priceText and the estimated fair price is $fairPriceText. A negative expected return suggests the stock may be trading above calculated fair value.',
       );
     }
@@ -3260,7 +3280,7 @@ class _ResultPageState extends State<ResultPage> {
 
     parts.add(
       isKoLang
-          ? '요구수익률은 투자할 때 내가 원하는 기준 수익률이고, 지금은 ${rPct.toStringAsFixed(1)}%입니다. ROE는 $roeText이고, ROE/r는 $roeOverRText입니다. $roeAction'
+          ? '요구수익률은 투자할 때 내가 원하는 기준 수익률이고, 지금은 ${rPct.toStringAsFixed(1)}%입니다. ROE는 $roeText이고, ROE/r는 $roeOverRTextWithUnit입니다. $roeAction'
           : 'Required return is ${rPct.toStringAsFixed(1)}%. ROE is $roeText and ROE/r is $roeOverRText. $roeAction',
     );
 
@@ -3275,7 +3295,7 @@ class _ResultPageState extends State<ResultPage> {
 
     parts.add(
       isKoLang
-          ? 'PER는 $perText이고, PBR은 $pbrText입니다. $perExplain $pbrExplain $perPbrAction'
+          ? 'PER는 $perTextWithUnit이고, PBR은 $pbrTextWithUnit입니다. $perExplain $pbrExplain $perPbrAction'
           : 'PER is $perText and PBR is $pbrText. $perExplain $pbrExplain $perPbrAction',
     );
 
