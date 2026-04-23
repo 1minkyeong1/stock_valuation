@@ -326,9 +326,13 @@ class KisKrStockRepository implements StockRepository {
     final c = _normalizeCode(code);
     if (c.isEmpty) throw Exception('code is empty');
 
+    // final qs = <String, String>{
+    //   'code': c,
+    //   'reprt_code': '11011',
+    //   'fs_div': 'CFS',
+    // };
     final qs = <String, String>{
       'code': c,
-      'reprt_code': '11011',
       'fs_div': 'CFS',
     };
 

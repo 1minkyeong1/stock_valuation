@@ -676,11 +676,14 @@ class _ResultPageState extends State<ResultPage> {
       _initF = f;
 
       // ✅ 기본 5.0이 아니라, 랭킹에서 들어왔으면 랭킹 r 사용
-      final initialRPct = (widget.initialRequiredReturnPct ?? 10.0).clamp(5.0, 20.0).toDouble();
+      final marketDefaultRPct = widget.market == Market.kr ? 15.0 : 10.0;
 
-      _initR = widget.useRankingSnapshot
-          ? (widget.rankingRPct ?? initialRPct)
-          : initialRPct;
+      final passedRPct =
+          widget.rankingRPct ??
+          widget.initialRequiredReturnPct ??
+          marketDefaultRPct;
+
+      _initR = passedRPct.clamp(5.0, 20.0).toDouble();
 
       rPct = _initR;
       _rPctCtrl.text = rPct.toStringAsFixed(1);
@@ -688,25 +691,23 @@ class _ResultPageState extends State<ResultPage> {
       _applyToTextFields(price: price, f: f);
 
       // 4) 저장값 복원
-      // ✅ 랭킹에서 들어왔으면 저장값 복원 건너뜀
-      if (!widget.useRankingSnapshot) {
-        _setStage(t.loadingRestoreSaved);
-        final saved = await _inputStore.load(_storeKey).timeout(
-          const Duration(seconds: 3),
-          onTimeout: () => null,
-        );
+      _setStage(t.loadingRestoreSaved);
 
-        if (saved != null) {
-          // 최신 조회한 EPS / BPS / DPS 는 유지
-          // 사용자가 마지막에 설정한 요구수익률만 복원
-          if (widget.initialRequiredReturnPct == null) {
-            rPct = saved.rPct;
-            _rPctCtrl.text = rPct.toStringAsFixed(1);
-          }
+      final saved = await _inputStore.load(_storeKey).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
+
+      if (saved != null) {
+        final hasExplicitRPct =
+            widget.rankingRPct != null || widget.initialRequiredReturnPct != null;
+
+        // 랭킹이나 검색에서 명시적으로 넘겨준 요구수익률이 있으면
+        // 저장된 값으로 덮어쓰지 않음
+        if (!hasExplicitRPct) {
+          rPct = saved.rPct.clamp(5.0, 20.0).toDouble();
+          _rPctCtrl.text = rPct.toStringAsFixed(1);
         }
-        
-      } else {
-        _setStage(t.loadingApplyRankingSnapshot);
       }
 
       if (!mounted) return;
