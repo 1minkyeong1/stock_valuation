@@ -452,7 +452,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         _krLoading = false;
       });
 
-      _prefetchKrQuotes(maxN: parsed.length);
+      _prefetchKrQuotes(maxN: 20);
     } catch (e, st) {
       debugPrint('[Ranking][KR] load failed: $e');
       debugPrint('$st');
@@ -521,7 +521,7 @@ class _RankingPageState extends State<RankingPage> with TickerProviderStateMixin
         _usLoading = false;
       });
 
-      _prefetchUsQuotes(maxN: parsed.length);
+      _prefetchUsQuotes(maxN: 20);
     } catch (e, st) {
       debugPrint('[Ranking][US] load failed: $e');
       debugPrint('$st');
